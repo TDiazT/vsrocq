@@ -92,6 +92,21 @@ val view_task : prepared_task -> [
 
 val interrupt_execution : state -> unit
 
+(** [interp_ast ~doc_id ~state_id ~st ~error_recovery ast] interprets [ast]
+    (already synterp-processed) on top of an arbitrary [st], independent of
+    any document/[state]. [doc_id]/[state_id] are only used to tag Rocq's
+    Feedback system; they need not correspond to a real document sentence.
+    This is the primitive Petanque-lite's [run] is built on (spike, 2026-07,
+    see CONTEXT.md "Petanque-lite"): the interp step itself was already
+    decoupled from document/sentence_id internally, it just wasn't exposed. *)
+val interp_ast :
+  doc_id:document_id ->
+  state_id:sentence_id ->
+  st:Vernacstate.t ->
+  error_recovery:Scheduler.error_recovery_strategy ->
+  Synterp.vernac_control_entry ->
+  Vernacstate.t * sentence_checking_result
+
 (** Rocq toplevels for delegation without fork *)
 module ProofWorkerProcess : sig
   type options

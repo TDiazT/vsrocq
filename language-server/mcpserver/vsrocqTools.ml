@@ -60,6 +60,25 @@ module Args = struct
     query_type : string;  (* "search", "print", "locate", "about" *)
     pattern : string;
   } [@@deriving yojson]
+
+  (* Petanque-lite (spike, 2026-07): start/run/goals operate on integer state
+     handles, independent of any document position past petanque_start. See
+     CONTEXT.md "Petanque-lite" / "State handle". *)
+
+  type petanque_start = {
+    uri : string;
+    line : int;
+    character : int;
+  } [@@deriving yojson]
+
+  type petanque_run = {
+    handle : int;
+    tactic : string;
+  } [@@deriving yojson]
+
+  type petanque_goals = {
+    handle : int;
+  } [@@deriving yojson]
 end
 
 module Schema = struct
@@ -103,6 +122,27 @@ module Schema = struct
       ("pattern", property ~type_:"string" ~description:"The search pattern or identifier for the query");
     ]
     ~required:["uri"; "query_type"; "pattern"]
+
+  let handle_prop = property ~type_:"integer" ~description:"A state handle previously returned by petanque_start or petanque_run"
+
+  let petanque_start = JsonSchema.make
+    ~properties:[
+      ("uri", uri_prop);
+      ("line", property ~type_:"integer" ~description:"The 0-indexed line number; must already be checked (interpret_to_point/interpret_to_end)");
+      ("character", property ~type_:"integer" ~description:"The 0-indexed character position");
+    ]
+    ~required:["uri"; "line"; "character"]
+
+  let petanque_run = JsonSchema.make
+    ~properties:[
+      ("handle", handle_prop);
+      ("tactic", property ~type_:"string" ~description:"A single Rocq tactic/command to run against the state, e.g. 'apply foo.'");
+    ]
+    ~required:["handle"; "tactic"]
+
+  let petanque_goals = JsonSchema.make
+    ~properties:[("handle", handle_prop)]
+    ~required:["handle"]
 end
 
 module Definitions = struct
@@ -150,6 +190,21 @@ module Definitions = struct
     ~description:"Execute a query on the document. Supported query types: 'search', 'print', 'locate', 'about'. Position is optional and defaults to the current proof state position. For 'search', 'print', 'locate', and 'about' queries, use the pattern field to specify the search pattern or identifier."
     ~inputSchema:Schema.query
 
+  let petanque_start = Tool.make
+    ~name:"petanque_start"
+    ~description:"Petanque-lite (spike): get a state handle for the already-checked sentence at or before a document position. Independent of the document past this call - use petanque_run/petanque_goals on the returned handle."
+    ~inputSchema:Schema.petanque_start
+
+  let petanque_run = Tool.make
+    ~name:"petanque_run"
+    ~description:"Petanque-lite (spike): run a single tactic/command against a state handle. Returns a new handle on success; on failure the input handle is unchanged and no new handle is allocated."
+    ~inputSchema:Schema.petanque_run
+
+  let petanque_goals = Tool.make
+    ~name:"petanque_goals"
+    ~description:"Petanque-lite (spike): get the goals/hypotheses for a state handle."
+    ~inputSchema:Schema.petanque_goals
+
   let all : McpBase.Tool.t list = [
     open_document;
     close_document;
@@ -159,5 +214,8 @@ module Definitions = struct
     step_backward;
     get_proof_state;
     query;
+    petanque_start;
+    petanque_run;
+    petanque_goals;
   ]
 end

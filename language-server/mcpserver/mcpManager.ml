@@ -332,6 +332,40 @@ let handle_query args =
       ToolsCallResult.error (Printf.sprintf "Query failed: %s" message)
   )
 
+(* Petanque-lite (spike, 2026-07): see CONTEXT.md "Petanque-lite". Handles
+   are process-global (Dm.PetanqueLite.HandleTable), not tied to a document -
+   only petanque_start needs to look one up. *)
+
+let handle_petanque_start args =
+  let open ToolArgs in
+  let ({ uri; line; character } : petanque_start) = petanque_start_of_yojson args in
+  log (fun () -> Printf.sprintf "Petanque start: %s:%d:%d" uri line character);
+  let pos = Position.create ~line ~character in
+  with_document uri ~f:(fun doc ->
+    ensure_document_sync doc uri;
+    wait_for_parsing doc;
+    process_events_until_stable doc;
+    let document = Dm.DocumentManager.Internal.document doc.st in
+    match Dm.PetanqueLite.start document pos with
+    | Ok handle -> ToolsCallResult.success [Content.text (Printf.sprintf "handle: %d" handle)]
+    | Error msg -> ToolsCallResult.error msg)
+
+let handle_petanque_run args =
+  let open ToolArgs in
+  let ({ handle; tactic } : petanque_run) = petanque_run_of_yojson args in
+  log (fun () -> Printf.sprintf "Petanque run: handle %d, tactic %s" handle tactic);
+  match Dm.PetanqueLite.run handle tactic with
+  | Ok new_handle -> ToolsCallResult.success [Content.text (Printf.sprintf "handle: %d" new_handle)]
+  | Error msg -> ToolsCallResult.error msg
+
+let handle_petanque_goals args =
+  let open ToolArgs in
+  let ({ handle } : petanque_goals) = petanque_goals_of_yojson args in
+  log (fun () -> Printf.sprintf "Petanque goals: handle %d" handle);
+  match Dm.PetanqueLite.goals handle with
+  | Ok ps -> ToolsCallResult.success [Content.text (McpPrinting.format_proof_state ps)]
+  | Error msg -> ToolsCallResult.error msg
+
 (** Dispatch tool calls *)
 let dispatch_tool name args =
   let args = match args with Some a -> a | None -> `Null in
@@ -344,6 +378,9 @@ let dispatch_tool name args =
   | "step_backward" -> handle_step_backward args
   | "get_proof_state" -> handle_get_proof_state args
   | "query" -> handle_query args
+  | "petanque_start" -> handle_petanque_start args
+  | "petanque_run" -> handle_petanque_run args
+  | "petanque_goals" -> handle_petanque_goals args
   | _ -> ToolsCallResult.error (Printf.sprintf "Unknown tool: %s" name)
 
 (** Handle MCP notifications *)
