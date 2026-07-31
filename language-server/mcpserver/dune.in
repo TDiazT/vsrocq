@@ -4,7 +4,7 @@
  (modules mcpBase mcpManager mcpPrinting vsrocqTools)
  (libraries yojson @@ROCQ_RUNTIME@@.sysinit @@ROCQ_RUNTIME@@.vernac lsp sel dm protocol vsrocqtop_boot)
  (preprocessor_deps vsrocq_config.mlh)
- (preprocess (pps ppx_import ppx_sexp_conv ppx_yojson_conv ppx_optcomp -- -cookie "ppx_optcomp.env=env ~rocq:(Defined \"%{coq:version.major}.%{coq:version.minor}\")")))
+ (preprocess (pps ppx_import ppx_sexp_conv ppx_yojson_conv ppx_optcomp -- -cookie "ppx_optcomp.env=env ~rocq:(Defined \"@@ROCQVERSION@@\")")))
 
 (executable
  (name vsrocqmcp)
