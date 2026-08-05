@@ -1,4 +1,5 @@
 import * as cp from "node:child_process";
+import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -22,7 +23,10 @@ import { URI } from "vscode-uri";
 
 import { Settings, defaultSettings } from "./settings";
 
-const fixturesDir = path.resolve(__dirname, "../../../src/test/lsp/fixtures");
+export const fixturesDir = path.resolve(
+    __dirname,
+    "../../../src/test/lsp/fixtures",
+);
 
 /**
  * `prover/updateHighlights` is declared in `protocol/extProtocol.ml` under
@@ -102,6 +106,73 @@ export function resolveVsrocqtop(): { command: string; args: string[] } {
         );
     const args = fixedArguments ?? process.env.VSROCQARGS?.split(" ") ?? [];
     return { command, args };
+}
+
+/**
+ * Compiles `<subdirectory>/<file>` to a `.vo`, so that another fixture in the
+ * same directory can `Require` it.
+ *
+ * Some requests only ever answer about names that came from a compiled
+ * library: `jump_to_definition` in `dm/queryManager.ml` returns a location
+ * only for a `Loc.fname` of `InFile { dirpath = Some _ }`, and a name defined
+ * in the buffer being edited is `ToplevelInput` instead. A fixture for one of
+ * those needs two files, one of them already on the loadpath. The loadpath
+ * itself comes from a `_RocqProject` next to them, which `vsrocqtop` reads on
+ * `didOpen` by walking up from the opened file's directory
+ * (`Args.get_local_args`, called from `open_new_document`).
+ *
+ * The `.vo` is built here rather than committed: it is not portable across
+ * the Rocq versions the CI matrix covers, and it has to be readable by the
+ * exact server under test. That is why the compiler is taken from the
+ * directory `VSROCQPATH` points into whenever that variable is set. A `rocq`
+ * found on `PATH` can belong to a different installation than the
+ * `vsrocqtop` being driven, and a `.vo` built by one is rejected by the
+ * other at `Require` time.
+ *
+ * `rocq compile` exists from Rocq 9.0 on, so this is usable from golden tests
+ * (pinned to one Rocq version) but not from the version-independent ones.
+ */
+export async function compileFixture(
+    subdirectory: string,
+    logicalName: string,
+    file: string,
+): Promise<void> {
+    const directory = path.join(fixturesDir, subdirectory);
+    const { command } = resolveVsrocqtop();
+    const sibling = path.join(path.dirname(command), "rocq");
+    const compiler = existsSync(sibling) ? sibling : "rocq";
+
+    const args = [
+        "compile",
+        "-R",
+        directory,
+        logicalName,
+        path.join(directory, file),
+    ];
+
+    await new Promise<void>((resolve, reject) => {
+        const child = cp.spawn(compiler, args, {
+            stdio: ["ignore", "inherit", "inherit"],
+        });
+        const failed = (detail: string) =>
+            reject(
+                new Error(
+                    `Could not build the fixture library this test requires: ` +
+                        `${compiler} ${args.join(" ")} ${detail}. The library ` +
+                        `is a prerequisite of the test, not part of what it ` +
+                        `asserts.`,
+                ),
+            );
+
+        child.once("error", (error) => failed(`could not be run (${error})`));
+        child.once("exit", (code) => {
+            if (code === 0) {
+                resolve();
+                return;
+            }
+            failed(`exited with ${code}`);
+        });
+    });
 }
 
 /**

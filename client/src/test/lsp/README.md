@@ -32,7 +32,8 @@ tests do inherit it, and need to — `dev-setup-opam` passes their server its
   `waitUntilChecked`, `sendConfiguration`, `shutdown`, plus the raw
   `connection` (a `vscode-languageserver-protocol` `ProtocolConnection`) for
   everything feature-specific. One process per test, not one shared server,
-  so a test can't observe another test's state.
+  so a test can't observe another test's state. Also `compileFixture`, for
+  the fixtures described below.
 * `settings.ts`: the settings object sent as `initializationOptions`.
   `defaultSettings()` deviates from the extension's own defaults in two
   fields (`proof.mode: Continuous`, `proof.block: false`). See the
@@ -41,7 +42,10 @@ tests do inherit it, and need to — `dev-setup-opam` passes their server its
   `golden/<name>.json`. `UPDATE_GOLDEN=1` rewrites the file in the working
   tree and never commits it. Read the diff before committing what it wrote.
   A regeneration that isn't read is a certificate for whatever the server
-  happens to do today, including regressions.
+  happens to do today, including regressions. Tests pass the response
+  through untouched, with one exception: a response carrying an absolute
+  path has to be made relative first, or the golden would freeze in place
+  the directory this checkout lives in. See `golden/definition.test.ts`.
 * `fixtures/`: `.v` files purpose-built for this suite.
   `client/testFixture/` (used by `client/src/test/suite/`) is not reused.
 * `golden/`: one `.json` file per golden case, added alongside each
@@ -75,11 +79,30 @@ at the first error and `processedRange` never reaches the end of the
 document. A test that turns `block` on will see `waitUntilChecked` time out
 by design, not by bug.
 
+## Fixtures that need a compiled library
+
+Some requests only ever answer about names that come from a library on the
+loadpath. `jump_to_definition` in `dm/queryManager.ml` is one: it returns a
+location only for a `Loc.fname` of `InFile { dirpath = Some _ }`, and a name
+defined in the buffer being edited is `ToplevelInput` instead, for which it
+returns nothing. A fixture for one of those is a directory under `fixtures/`
+holding the file the test opens, the file it requires, and a `_RocqProject`
+declaring the loadpath. `vsrocqtop` reads that `_RocqProject` on `didOpen`,
+walking up from the opened file's directory (`Args.get_local_args`, called
+from `open_new_document`), so nothing in `harness.ts` has to know about it.
+
+`compileFixture` in `harness.ts` builds the `.vo`, from a `before` hook. The
+`.vo` is not committed: it is not portable across the Rocq versions CI
+covers, and it has to be readable by the exact server under test, so the
+compiler is taken from the directory `VSROCQPATH` points into whenever that
+variable is set, and off `PATH` otherwise. Since it runs `rocq compile`
+(Rocq 9.0 and later), only the version-pinned golden tests can use it.
+
+The `.vo`, `.glob` and `.aux` files this leaves in `fixtures/` are covered by
+`client/.gitignore`.
+
 ## What this suite does not do
 
-* It does not include a golden test for `definition`. The `Range`
-  returned by `jump_to_definition` in `dm/queryManager.ml` is no longer
-  inverted, but the golden test itself is a separate change.
 * It does not depend on `vscode-jsonrpc` / `vscode-languageserver-protocol`
   / `vscode-uri` as declared dependencies. They are transitive dependencies
   of `vscode-languageclient`, already present in `client/node_modules/`, and
