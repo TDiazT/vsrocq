@@ -19,10 +19,10 @@ suite("Should get diagnostics in the appropriate tab", function () {
         const doc1 = await common.openTextFile("delegate_proof.v");
         const doc2 = await common.openTextFile("warn.v");
 
-        await common.sleep(10000); // Wait for server initialization
-
-        const diagnostics1 = vscode.languages.getDiagnostics(doc1);
-        const diagnostics2 = vscode.languages.getDiagnostics(doc2);
+        const [diagnostics1, diagnostics2] = await Promise.all([
+            common.waitForDiagnostics(doc1, common.anyDiagnostic),
+            common.waitForDiagnostics(doc2, common.anyDiagnostic),
+        ]);
 
         // on some setups diagnostics from a leftover tab are somehow here,
         // but on other setups they are not
