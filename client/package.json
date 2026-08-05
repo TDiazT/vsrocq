@@ -1015,7 +1015,7 @@
     "package": "npm install && npm run build --workspaces",
     "compile-tests": "tsc --outDir out",
     "watch-tests": "tsc -w --outDir out",
-    "pretest": "npm run compile-tests && npm run build",
+    "pretest": "npm run build --workspaces && npm run compile-tests",
     "test": "node ./out/test/runTest.js",
     "format": "prettier --write ."
   },
