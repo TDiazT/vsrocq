@@ -219,7 +219,7 @@ let jump_to_definition document vs pos  =
                       (if Sys.file_exists f then
                         let b_pos = Position.create ~character:(loc.bp - loc.bol_pos) ~line:(loc.line_nb - 1) in
                         let e_pos = Position.create ~character:(loc.ep - loc.bol_pos) ~line:(loc.line_nb - 1) in
-                        let range = Range.create ~end_:b_pos ~start:e_pos in
+                        let range = Range.create ~start:b_pos ~end_:e_pos in
                         Some (range, f)
                       else
                         None

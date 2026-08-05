@@ -77,10 +77,9 @@ by design, not by bug.
 
 ## What this suite does not do
 
-* It does not fix the inverted `Range` returned by
-  `jump_to_definition` in `dm/queryManager.ml` (`start` and `end` are
-  swapped). That is a separate change, and a prerequisite only for the
-  `definition` golden test.
+* It does not include a golden test for `definition`. The `Range`
+  returned by `jump_to_definition` in `dm/queryManager.ml` is no longer
+  inverted, but the golden test itself is a separate change.
 * It does not depend on `vscode-jsonrpc` / `vscode-languageserver-protocol`
   / `vscode-uri` as declared dependencies. They are transitive dependencies
   of `vscode-languageclient`, already present in `client/node_modules/`, and
