@@ -78,6 +78,18 @@ jobs:
         command: |
             nix develop .#vsrocq-${{ matrix.coq }} -c bash -c "cd client && npm test"
       if: runner.os != 'Linux'
+    # Version-independent: runs on the whole matrix. No xvfb needed, since
+    # this suite never launches VS Code/Electron, it drives vsrocqtop over
+    # stdio.
+    - name: Test LSP suite
+      run: nix develop .#vsrocq-${{ matrix.coq }} -c bash -c "cd client && npm run test:lsp"
+    # Content-frozen goldens: pinned to one Rocq version (see
+    # `client/src/test/lsp/README.md`). `coq == 9` is this matrix's Rocq 9.2
+    # entry. Guarded because no golden test exists yet: they land one at a
+    # time, feature by feature.
+    - name: Test LSP golden (Rocq 9.2)
+      if: ${{ matrix.coq == 9 }}
+      run: nix develop .#vsrocq-${{ matrix.coq }} -c bash -c "cd client && if ls out/test/lsp/golden/*.test.js >/dev/null 2>&1; then npm run test:lsp:golden; else echo 'no golden tests yet'; fi"
     - name: Language server init log
       if: ${{ failure() }}
       run: cat /tmp/vsrocq_init_log.* 2>/dev/null || echo "no init log was written"
@@ -134,6 +146,30 @@ jobs:
     - run: |
         eval $(opam env) && cd client && xvfb-run npm test
       if: runner.os == 'Linux'
+      env:
+        VSROCQPATH: ${{ env.vsrocqtop }}
+        VSROCQARGS: "-bt"
+    # Version-independent, same gating as the step above: `npm install`
+    # (via `npm run package`) only runs on Linux in this job. No xvfb needed,
+    # since this suite drives vsrocqtop over stdio, not VS Code/Electron.
+    - name: Test LSP suite
+      run: cd client && npm run test:lsp
+      if: runner.os == 'Linux'
+      env:
+        VSROCQPATH: ${{ env.vsrocqtop }}
+        VSROCQARGS: "-bt"
+    # Content-frozen goldens: pinned to Rocq 9.2 (see
+    # `client/src/test/lsp/README.md`). Guarded because no golden test
+    # exists yet (they land feature by feature).
+    - name: Test LSP golden (Rocq 9.2)
+      if: runner.os == 'Linux' && matrix.coq == '9.2.0'
+      run: |
+        cd client
+        if ls out/test/lsp/golden/*.test.js >/dev/null 2>&1; then
+          npm run test:lsp:golden
+        else
+          echo 'no golden tests yet'
+        fi
       env:
         VSROCQPATH: ${{ env.vsrocqtop }}
         VSROCQARGS: "-bt"
@@ -220,6 +256,14 @@ jobs:
 
     - run: cd client && npm install && npm run build --workspaces
     - run: cd client && xvfb-run npm test
+      env:
+        VSROCQARGS: "${{ env.vsrocqlib }}"
+
+    # Version-independent: no xvfb needed, this suite drives vsrocqtop over
+    # stdio, not VS Code/Electron. Not gated to one `profile`/`coq` cell here:
+    # this job always builds `rocq-core=dev`, so it is never the Rocq 9.2 pin
+    # and never runs the golden half (see `client/src/test/lsp/README.md`).
+    - run: cd client && npm run test:lsp
       env:
         VSROCQARGS: "${{ env.vsrocqlib }}"
 
