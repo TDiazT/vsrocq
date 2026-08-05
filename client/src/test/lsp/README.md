@@ -37,7 +37,7 @@ harness falls back to
 * `fixtures/`: `.v` files purpose-built for this suite.
   `client/testFixture/` (used by `client/src/test/suite/`) is not reused.
 * `golden/`: one `.json` file per golden case, added alongside each
-  feature's test. Empty for now.
+  feature's test.
 * `smoke.test.ts`: the one test that isn't feature-specific. It proves the
   harness itself works end to end.
 
