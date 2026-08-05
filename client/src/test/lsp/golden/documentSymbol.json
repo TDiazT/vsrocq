@@ -1,0 +1,179 @@
+[
+  {
+    "children": [
+      {
+        "detail": "Definition one := 1.",
+        "kind": 13,
+        "name": "one",
+        "range": {
+          "end": {
+            "character": 22,
+            "line": 2
+          },
+          "start": {
+            "character": 2,
+            "line": 2
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 22,
+            "line": 2
+          },
+          "start": {
+            "character": 2,
+            "line": 2
+          }
+        }
+      },
+      {
+        "detail": "Inductive bin :=\n  | O\n  | I.",
+        "kind": 23,
+        "name": "I",
+        "range": {
+          "end": {
+            "character": 6,
+            "line": 6
+          },
+          "start": {
+            "character": 2,
+            "line": 4
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 6,
+            "line": 6
+          },
+          "start": {
+            "character": 2,
+            "line": 4
+          }
+        }
+      },
+      {
+        "detail": "Inductive bin :=\n  | O\n  | I.",
+        "kind": 23,
+        "name": "O",
+        "range": {
+          "end": {
+            "character": 6,
+            "line": 6
+          },
+          "start": {
+            "character": 2,
+            "line": 4
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 6,
+            "line": 6
+          },
+          "start": {
+            "character": 2,
+            "line": 4
+          }
+        }
+      },
+      {
+        "detail": "Inductive bin :=\n  | O\n  | I.",
+        "kind": 23,
+        "name": "bin",
+        "range": {
+          "end": {
+            "character": 6,
+            "line": 6
+          },
+          "start": {
+            "character": 2,
+            "line": 4
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 6,
+            "line": 6
+          },
+          "start": {
+            "character": 2,
+            "line": 4
+          }
+        }
+      },
+      {
+        "detail": "Lemma one_eq_one : one = 1.",
+        "kind": 12,
+        "name": "one_eq_one",
+        "range": {
+          "end": {
+            "character": 29,
+            "line": 8
+          },
+          "start": {
+            "character": 2,
+            "line": 8
+          }
+        },
+        "selectionRange": {
+          "end": {
+            "character": 29,
+            "line": 8
+          },
+          "start": {
+            "character": 2,
+            "line": 8
+          }
+        }
+      }
+    ],
+    "detail": "",
+    "kind": 5,
+    "name": "Basics",
+    "range": {
+      "end": {
+        "character": 15,
+        "line": 0
+      },
+      "start": {
+        "character": 0,
+        "line": 0
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 15,
+        "line": 0
+      },
+      "start": {
+        "character": 0,
+        "line": 0
+      }
+    }
+  },
+  {
+    "detail": "Definition two := 1 + 1.",
+    "kind": 13,
+    "name": "two",
+    "range": {
+      "end": {
+        "character": 24,
+        "line": 15
+      },
+      "start": {
+        "character": 0,
+        "line": 15
+      }
+    },
+    "selectionRange": {
+      "end": {
+        "character": 24,
+        "line": 15
+      },
+      "start": {
+        "character": 0,
+        "line": 15
+      }
+    }
+  }
+]
