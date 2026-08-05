@@ -1,0 +1,255 @@
+{
+  "range": {
+    "end": {
+      "character": 11,
+      "line": 2
+    },
+    "start": {
+      "character": 2,
+      "line": 2
+    }
+  },
+  "proof": {
+    "goals": [
+      {
+        "id": 3,
+        "name": null,
+        "hypotheses": [
+          [
+            "Ppcmd_box",
+            [
+              "Pp_hovbox",
+              2
+            ],
+            [
+              "Ppcmd_glue",
+              [
+                [
+                  "Ppcmd_box",
+                  [
+                    "Pp_hovbox",
+                    0
+                  ],
+                  [
+                    "Ppcmd_string",
+                    "n"
+                  ]
+                ],
+                [
+                  "Ppcmd_string",
+                  " :"
+                ],
+                [
+                  "Ppcmd_print_break",
+                  1,
+                  0
+                ],
+                [
+                  "Ppcmd_tag",
+                  "constr.variable",
+                  [
+                    "Ppcmd_string",
+                    "nat"
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ],
+        "goal": [
+          "Ppcmd_box",
+          [
+            "Pp_hovbox",
+            0
+          ],
+          [
+            "Ppcmd_glue",
+            [
+              [
+                "Ppcmd_box",
+                [
+                  "Pp_hovbox",
+                  0
+                ],
+                [
+                  "Ppcmd_glue",
+                  [
+                    [
+                      "Ppcmd_tag",
+                      "constr.variable",
+                      [
+                        "Ppcmd_string",
+                        "n"
+                      ]
+                    ],
+                    [
+                      "Ppcmd_tag",
+                      "constr.notation",
+                      [
+                        "Ppcmd_string",
+                        " +"
+                      ]
+                    ],
+                    [
+                      "Ppcmd_print_break",
+                      1,
+                      0
+                    ],
+                    [
+                      "Ppcmd_string",
+                      "0"
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "Ppcmd_tag",
+                "constr.notation",
+                [
+                  "Ppcmd_string",
+                  " ="
+                ]
+              ],
+              [
+                "Ppcmd_print_break",
+                1,
+                0
+              ],
+              [
+                "Ppcmd_tag",
+                "constr.variable",
+                [
+                  "Ppcmd_string",
+                  "n"
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    ],
+    "shelvedGoals": [],
+    "givenUpGoals": [],
+    "unfocusedGoals": [
+      {
+        "id": 3,
+        "name": null,
+        "hypotheses": [
+          [
+            "Ppcmd_box",
+            [
+              "Pp_hovbox",
+              2
+            ],
+            [
+              "Ppcmd_glue",
+              [
+                [
+                  "Ppcmd_box",
+                  [
+                    "Pp_hovbox",
+                    0
+                  ],
+                  [
+                    "Ppcmd_string",
+                    "n"
+                  ]
+                ],
+                [
+                  "Ppcmd_string",
+                  " :"
+                ],
+                [
+                  "Ppcmd_print_break",
+                  1,
+                  0
+                ],
+                [
+                  "Ppcmd_tag",
+                  "constr.variable",
+                  [
+                    "Ppcmd_string",
+                    "nat"
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ],
+        "goal": [
+          "Ppcmd_box",
+          [
+            "Pp_hovbox",
+            0
+          ],
+          [
+            "Ppcmd_glue",
+            [
+              [
+                "Ppcmd_box",
+                [
+                  "Pp_hovbox",
+                  0
+                ],
+                [
+                  "Ppcmd_glue",
+                  [
+                    [
+                      "Ppcmd_tag",
+                      "constr.variable",
+                      [
+                        "Ppcmd_string",
+                        "n"
+                      ]
+                    ],
+                    [
+                      "Ppcmd_tag",
+                      "constr.notation",
+                      [
+                        "Ppcmd_string",
+                        " +"
+                      ]
+                    ],
+                    [
+                      "Ppcmd_print_break",
+                      1,
+                      0
+                    ],
+                    [
+                      "Ppcmd_string",
+                      "0"
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "Ppcmd_tag",
+                "constr.notation",
+                [
+                  "Ppcmd_string",
+                  " ="
+                ]
+              ],
+              [
+                "Ppcmd_print_break",
+                1,
+                0
+              ],
+              [
+                "Ppcmd_tag",
+                "constr.variable",
+                [
+                  "Ppcmd_string",
+                  "n"
+                ]
+              ]
+            ]
+          ]
+        ]
+      }
+    ]
+  },
+  "messages": [],
+  "pp_proof": null,
+  "pp_messages": []
+}
