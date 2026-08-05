@@ -1,0 +1,18 @@
+[
+  {
+    "code": "quickfix-replace",
+    "data": [],
+    "message": "The term \"true\" has type \"bool\" while it is expected to have type \"nat\".",
+    "range": {
+      "end": {
+        "character": 28,
+        "line": 0
+      },
+      "start": {
+        "character": 24,
+        "line": 0
+      }
+    },
+    "severity": 1
+  }
+]
