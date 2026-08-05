@@ -1,0 +1,45 @@
+{
+  "isIncomplete": false,
+  "items": [
+    {
+      "detail": "widget",
+      "documentation": "Path: completion.Beta\nScore: 5.000000, Size: 1.000000, Final Score: -24.000000",
+      "filterText": "Beta",
+      "insertText": "Beta",
+      "label": "★ Beta",
+      "sortText": "    0"
+    },
+    {
+      "detail": "widget",
+      "documentation": "Path: completion.Alpha\nScore: 5.000000, Size: 1.000000, Final Score: -24.000000",
+      "filterText": "Alpha",
+      "insertText": "Alpha",
+      "label": "★ Alpha",
+      "sortText": "    1"
+    },
+    {
+      "detail": "widget",
+      "documentation": "Path: completion.a_widget\nScore: 5.000000, Size: 1.000000, Final Score: -24.000000",
+      "filterText": "a_widget",
+      "insertText": "a_widget",
+      "label": "★ a_widget",
+      "sortText": "    2"
+    },
+    {
+      "detail": "forall P : widget -> Type, P Alpha -> P Beta -> forall w : widget, P w",
+      "documentation": "Path: completion.widget_rect\nScore: 5.000000, Size: 2.000000, Final Score: -23.000000",
+      "filterText": "widget_rect",
+      "insertText": "widget_rect",
+      "label": "widget_rect",
+      "sortText": "    3"
+    },
+    {
+      "detail": "forall P : widget -> Prop, P Alpha -> P Beta -> forall w : widget, P w",
+      "documentation": "Path: completion.widget_ind\nScore: 5.000000, Size: 2.000000, Final Score: -23.000000",
+      "filterText": "widget_ind",
+      "insertText": "widget_ind",
+      "label": "widget_ind",
+      "sortText": "    4"
+    }
+  ]
+}
