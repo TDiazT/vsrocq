@@ -1005,6 +1005,10 @@
     "watch-tests": "tsc -w --outDir out",
     "pretest": "npm run build --workspaces && npm run compile-tests",
     "test": "node ./out/test/runTest.js",
+    "pretest:lsp": "npm run compile-tests",
+    "test:lsp": "mocha \"out/test/lsp/*.test.js\" --timeout 20000",
+    "pretest:lsp:golden": "npm run compile-tests",
+    "test:lsp:golden": "mocha \"out/test/lsp/golden/*.test.js\" --timeout 20000",
     "format": "prettier --write ."
   },
   "devDependencies": {
