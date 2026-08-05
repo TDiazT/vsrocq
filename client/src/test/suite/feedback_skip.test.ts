@@ -7,29 +7,29 @@ import * as common from "./common";
 suite("Should get diagnostics in the appropriate tab", function () {
     this.timeout(20000);
 
+    teardown(common.resetTestState);
+
     test("Skipping proofs", async () => {
         const ext = vscode.extensions.getExtension("rocq-prover.vsrocq")!;
         await ext.activate();
 
-        vscode.workspace
-            .getConfiguration()
-            .update("vsrocq.proof.delegation", "Skip");
-        vscode.workspace.getConfiguration().update("vsrocq.proof.mode", 1);
+        await common.configure("vsrocq.proof.delegation", "Skip");
+        await common.configure("vsrocq.proof.mode", 1);
 
-        const doc1 = await common.openTextFile("delegate_proof.v");
+        const doc1 = await common.openFixture("delegate_proof.v");
 
-        const doc2 = await common.openTextFile("warn.v");
+        const doc2 = await common.openFixture("warn.v");
 
         const [diagnostics1, diagnostics2] = await Promise.all([
             common.waitForDiagnostics(doc1, common.anyDiagnostic),
             common.waitForDiagnostics(doc2, common.anyDiagnostic),
         ]);
 
-        // on some setups diagnostics from a leftover tab are somehow here,
-        // but on other setups they are not
-        // expect(diagnostics1.length).toBe(2);
-        // expect(diagnostics1[1].message).toMatch(/.*foobar was not found.*/);
-        // expect(diagnostics1[1].severity).toBe(vscode.DiagnosticSeverity.Error);
+        // The count is deliberately not asserted. It is no longer unstable for
+        // the reason it used to be — leftover diagnostics from another test,
+        // which opening a private copy of the fixture rules out — but `Skip`
+        // drops the errors inside skipped proofs, and how many survive was
+        // only measured on Rocq 9.2 while this suite runs on eight versions.
         expect(diagnostics1[0].message).toMatch(
             /.*Attempt to save an incomplete proof.*/,
         );
