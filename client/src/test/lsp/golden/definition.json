@@ -1,0 +1,15 @@
+[
+  {
+    "range": {
+      "end": {
+        "character": 17,
+        "line": 0
+      },
+      "start": {
+        "character": 11,
+        "line": 0
+      }
+    },
+    "uri": "definition/Target.v"
+  }
+]
