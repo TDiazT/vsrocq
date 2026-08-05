@@ -4,3 +4,8 @@ out/
 .vscode-test/*
 testFixture/
 src/package-json.ts
+# Built per test run by the LSP suite's `compileFixture`. A `.vo` is not
+# portable across the Rocq versions CI covers, so it is never committed.
+src/test/lsp/fixtures/**/*.vo
+src/test/lsp/fixtures/**/*.glob
+src/test/lsp/fixtures/**/.*.aux
