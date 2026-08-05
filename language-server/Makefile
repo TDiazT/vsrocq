@@ -66,9 +66,35 @@ test: $(DUNE_IN_FILES)
 	$(call dune_no_stop,runtest)
 .PHONY: test
 
+# dm, protocol, language and vsrocqtop are instrumented; the two dm/ worker
+# executables are not, since they are killed with SIGKILL
+# (see delegationManager.ml) and would never run the at_exit that dumps
+# their coverage data. --expect keeps the denominator fixed across runs, so
+# instrumented code that never executes shows up at 0% instead of being
+# silently absent from the report.
+#
+# bisect-ppx-report errors out (rather than reporting 0%) for a path with
+# zero coverage data at all, as opposed to a path with recorded-but-unvisited
+# points. Nothing exercises vsrocqtop yet (the worker executables are never
+# instrumented at all, see above), so both are --do-not-expect for now. Drop
+# the vsrocqtop --do-not-expect once a suite actually runs it.
+COVERAGE_EXPECT := --expect dm/ --expect protocol/ --expect language/ --expect vsrocqtop/ \
+  --do-not-expect dm/vsrocqtop_proof_worker.ml --do-not-expect dm/vsrocqtop_tactic_worker.ml \
+  --do-not-expect vsrocqtop/
+
+coverage: $(DUNE_IN_FILES)
+	$(RM) -r _coverage
+	ROCQLIB=`rocq -where 2>/dev/null` COQLIB=`coqc -where 2>/dev/null` \
+	$(call dune_no_stop,runtest) --instrument-with bisect_ppx --force
+	bisect-ppx-report summary $(COVERAGE_EXPECT)
+	bisect-ppx-report html $(COVERAGE_EXPECT)
+	@echo "HTML report: _coverage/index.html"
+.PHONY: coverage
+
 clean:
 	$(call dune,clean)
 	$(RM) $(DUNE_IN_FILES)
+	$(RM) -r _coverage
 .PHONY: clean
 
 install: $(DUNE_IN_FILES)
