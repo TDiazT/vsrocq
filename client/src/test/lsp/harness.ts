@@ -64,14 +64,43 @@ export function endOfDocument(text: string): Position {
     };
 }
 
-function resolveVsrocqtop(): { command: string; args: string[] } {
+/** Set by `useFixedServerArguments`, and `undefined` until it is called. */
+let fixedArguments: string[] | undefined;
+
+/**
+ * Fixes the arguments every server started from here on is spawned with,
+ * ignoring whatever `VSROCQARGS` holds.
+ *
+ * The golden half of the suite runs with this on: `golden/fixedArguments.ts`,
+ * which `test:lsp:golden` loads through mocha's `--require` before any test
+ * file, so it covers the goldens written later as much as today's.
+ *
+ * A golden freezes the server's answer verbatim, which means it has to freeze
+ * what the server was started with too. Inheriting instead makes a golden
+ * assert on the job that ran it: `install-opam` in `.github/workflows/ci.yml`
+ * exports `VSROCQARGS: -bt` for the whole job, which appends a ~20-frame Rocq
+ * backtrace to the text of every error, and the diagnostics golden below is
+ * captured without one. It would fail on that job alone and pass everywhere
+ * else, `nix-dev-build` included, which sets no `VSROCQARGS` at all.
+ *
+ * The structural half keeps inheriting the variable, and should: it asserts
+ * on the shape of what comes back rather than on its text, and
+ * `dev-setup-opam` passes the `-coqlib` its server cannot start without
+ * through that same variable. `VSROCQPATH` is inherited either way — it
+ * chooses which binary is under test, not what that binary prints.
+ */
+export function useFixedServerArguments(args: string[] = []): void {
+    fixedArguments = args;
+}
+
+export function resolveVsrocqtop(): { command: string; args: string[] } {
     const command =
         process.env.VSROCQPATH ||
         path.resolve(
             __dirname,
             "../../../../language-server/_build/install/default/bin/vsrocqtop",
         );
-    const args = process.env.VSROCQARGS?.split(" ") ?? [];
+    const args = fixedArguments ?? process.env.VSROCQARGS?.split(" ") ?? [];
     return { command, args };
 }
 

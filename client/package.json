@@ -1020,7 +1020,7 @@
     "pretest:lsp": "npm run compile-tests",
     "test:lsp": "mocha \"out/test/lsp/*.test.js\" --timeout 20000",
     "pretest:lsp:golden": "npm run compile-tests",
-    "test:lsp:golden": "mocha \"out/test/lsp/golden/*.test.js\" --timeout 20000",
+    "test:lsp:golden": "mocha --require ./out/test/lsp/golden/fixedArguments.js \"out/test/lsp/golden/*.test.js\" --timeout 20000",
     "format": "prettier --write ."
   },
   "devDependencies": {
