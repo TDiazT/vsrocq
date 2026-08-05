@@ -8,3 +8,4 @@ tests/dune
 dm/vsrocq_config.mlh
 tests/vsrocq_config.mlh
 *.install
+_coverage/

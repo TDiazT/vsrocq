@@ -419,6 +419,7 @@ let roots_for_prefix root_prefix analysis =
 
 let is_filtered_target analysis target =
   is_prefix "Stdlib" (display_name analysis target)
+  || is_prefix "Bisect_visit" (display_name analysis target)
 
 let rec collect_chains analysis visited path source chains =
   let callees =
