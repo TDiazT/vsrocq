@@ -12,10 +12,18 @@ npm run test:lsp:golden   # golden tests, pinned to Rocq 9.2, one CI job
 ```
 
 Both compile the client's TypeScript first (`pretest:lsp`,
-`pretest:lsp:golden`). `VSROCQPATH` / `VSROCQARGS` work the same as for
-`npm test` (see `client/src/test/runTest.ts`); without `VSROCQPATH` the
-harness falls back to
+`pretest:lsp:golden`). `VSROCQPATH` works the same as for `npm test` (see
+`client/src/test/runTest.ts`); without it the harness falls back to
 `language-server/_build/install/default/bin/vsrocqtop`.
+
+`VSROCQARGS` is read by the structural tests only. The golden run ignores it
+and spawns with a fixed argument set instead (`golden/fixedArguments.ts`,
+loaded through mocha's `--require`), because a golden freezes the server's
+answer verbatim and would otherwise freeze the ambient environment with it:
+`install-opam` in `.github/workflows/ci.yml` exports `VSROCQARGS: -bt`, which
+appends a ~20-frame Rocq backtrace to every error message. The structural
+tests do inherit it, and need to — `dev-setup-opam` passes their server its
+`-coqlib` that way.
 
 ## Layout
 
@@ -37,7 +45,9 @@ harness falls back to
 * `fixtures/`: `.v` files purpose-built for this suite.
   `client/testFixture/` (used by `client/src/test/suite/`) is not reused.
 * `golden/`: one `.json` file per golden case, added alongside each
-  feature's test.
+  feature's test. Also `fixedArguments.ts`, which fixes what the servers in
+  this directory are spawned with, and `fixedArguments.test.ts`, which checks
+  that it is reaching them.
 * `smoke.test.ts`: the one test that isn't feature-specific. It proves the
   harness itself works end to end.
 
