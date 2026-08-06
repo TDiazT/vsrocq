@@ -233,10 +233,31 @@ let send_error_notification message =
   let notification = Lsp.Server_notification.ShowMessage params in
   output_json @@ Jsonrpc.Notification.yojson_of_t @@ Lsp.Server_notification.to_jsonrpc notification
 
+(* update_view corre una vez por sentencia ejecutada, y publish_diagnostics
+   recolecta los diagnósticos de TODO el documento en cada llamada
+   (Document.all_feedback / all_checking_errors recorren sentences_by_id
+   entero), lo que hace que el chequeo completo sea cuadrático en la cantidad
+   de sentencias. Medido en un archivo de 20.000 Definitions,
+   Stdlib.Map.bindings era el tope absoluto del perfil de CPU.
+
+   El conjunto de diagnósticos casi nunca cambia entre una sentencia y la
+   siguiente -- la enorme mayoría se chequea sin error -- así que alcanza con
+   no republicar cuando nada cambió. Document.diags_version cuenta exactamente
+   esos cambios. Con diagnostics.full activo esa versión no alcanza (ahí
+   también se muestran los Info/Notice, que deliberadamente no cuenta), así
+   que en ese modo se publica siempre, como antes. *)
+let last_diags_version : (string, int) Hashtbl.t = Hashtbl.create 39
+
 let update_view uri st =
   if (Dm.ExecutionManager.is_diagnostics_enabled ()) then (
     send_highlights uri st;
-    publish_diagnostics uri st;
+    let path = DocumentUri.to_path uri in
+    let v = Dm.DocumentManager.diags_version st in
+    if !full_diagnostics || Hashtbl.find_opt last_diags_version path <> Some v
+    then begin
+      Hashtbl.replace last_diags_version path v;
+      publish_diagnostics uri st
+    end
   )
 
 let replace_state path st visible = Hashtbl.replace states path { st; visible}
