@@ -31,6 +31,17 @@ type event
 
 val pp_event : Format.formatter -> event -> unit
 
+val is_interpretation : event -> bool
+(** [is_interpretation ev] holds for the events that a client navigation
+    request ([prover/interpretTo{End,Next,Previous,Point}]) turns into. They
+    are the only events whose target sentence is resolved by looking it up in
+    the document, so they are the only ones that cannot be handled while the
+    document is still being parsed. *)
+
+val requeue : event -> event Sel.Event.t list
+(** [requeue ev] schedules [ev] again, for an event that had to be deferred.
+    Empty for any event [is_interpretation] rejects. *)
+
 type state
 
 val init : feedback_pipe:feedback_pipe -> Vernacstate.t -> state
