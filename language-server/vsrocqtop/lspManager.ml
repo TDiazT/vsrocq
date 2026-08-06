@@ -198,9 +198,7 @@ let publish_diagnostics uri doc =
   let diag_notification = Lsp.Server_notification.PublishDiagnostics params in
   output_notification (Std diag_notification)
 
-let send_highlights uri doc =
-  let { Dm.Types.processing;  processed; prepared } =
-    Dm.DocumentManager.executed_ranges doc in
+let send_highlights_of uri { Dm.Types.processing;  processed; prepared } =
   let notification = Notification.Server.UpdateHighlights {
     uri;
     preparedRange = prepared;
@@ -233,10 +231,44 @@ let send_error_notification message =
   let notification = Lsp.Server_notification.ShowMessage params in
   output_json @@ Jsonrpc.Notification.yojson_of_t @@ Lsp.Server_notification.to_jsonrpc notification
 
+let send_highlights uri doc =
+  send_highlights_of uri (Dm.DocumentManager.executed_ranges doc)
+
+(* update_view corre una vez por sentencia ejecutada, y publish_diagnostics
+   recolecta los diagnósticos de TODO el documento en cada llamada
+   (Document.all_feedback / all_checking_errors recorren sentences_by_id
+   entero). Sobre un documento de decenas de miles de sentencias eso hace
+   que el chequeo completo sea cuadrático: medido en un archivo de 20.000
+   Definitions, Stdlib.Map.bindings es el tope absoluto del perfil de CPU.
+   El trabajo además se descarta casi entero, porque el feedback "X is
+   defined" que emite cada sentencia mapea a severity Information y se filtra
+   acá abajo cuando full_diagnostics está en false (el default).
+
+   Los highlights se siguen enviando en cada paso (son de tamaño constante y
+   el cliente los usa para la barra de progreso); los diagnósticos se
+   coalescen a lo sumo uno cada diag_min_interval, con una publicación
+   garantizada cuando no queda nada por procesar -- así el estado final que
+   ve el cliente es siempre el completo. *)
+let diag_min_interval = 0.2 (* segundos *)
+let last_diag_publish : (string, float) Hashtbl.t = Hashtbl.create 39
+
 let update_view uri st =
   if (Dm.ExecutionManager.is_diagnostics_enabled ()) then (
-    send_highlights uri st;
-    publish_diagnostics uri st;
+    let ({ Dm.Types.processing; prepared; _ } as overview) =
+      Dm.DocumentManager.executed_ranges st in
+    send_highlights_of uri overview;
+    let path = DocumentUri.to_path uri in
+    let idle = processing = [] && prepared = [] in
+    let now = Unix.gettimeofday () in
+    let due =
+      match Hashtbl.find_opt last_diag_publish path with
+      | None -> true
+      | Some last -> now -. last >= diag_min_interval
+    in
+    if idle || due then begin
+      Hashtbl.replace last_diag_publish path now;
+      publish_diagnostics uri st
+    end
   )
 
 let replace_state path st visible = Hashtbl.replace states path { st; visible}
