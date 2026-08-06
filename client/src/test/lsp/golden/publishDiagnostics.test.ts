@@ -1,8 +1,3 @@
-import {
-    Diagnostic,
-    PublishDiagnosticsNotification,
-} from "vscode-languageserver-protocol/node";
-
 import { expectGolden } from "../golden";
 import { LspHarness, endOfDocument } from "../harness";
 
@@ -12,40 +7,22 @@ describe("publishDiagnostics", () => {
 
         const harness = await LspHarness.start();
         try {
-            let latestDiagnostics: Diagnostic[] = [];
-            let wake: (() => void) | undefined;
-            harness.connection.onNotification(
-                PublishDiagnosticsNotification.type,
-                (params) => {
-                    latestDiagnostics = params.diagnostics;
-                    wake?.();
-                },
-            );
-
             const { uri, text } = await harness.openDocument(
                 "publishDiagnostics.v",
             );
             await harness.waitUntilChecked(uri, endOfDocument(text));
 
-            await new Promise<void>((resolve, reject) => {
-                if (latestDiagnostics.length > 0) {
-                    resolve();
-                    return;
-                }
-                const timer = setTimeout(
-                    () => reject(new Error("Timed out waiting for a non-empty diagnostics list")),
-                    5000,
-                );
-                wake = () => {
-                    if (latestDiagnostics.length === 0) {
-                        return;
-                    }
-                    clearTimeout(timer);
-                    resolve();
-                };
-            });
+            // Not read off `latestDiagnostics` directly: the notification
+            // carrying the error arrives just after the `updateHighlights`
+            // that reports checking as finished, since `update_view` sends
+            // the two in that order (`lspManager.ml`).
+            const diagnostics = await harness.waitForDiagnostics(
+                uri,
+                (d) => d.length > 0,
+                5000,
+            );
 
-            expectGolden("publishDiagnostics", latestDiagnostics);
+            expectGolden("publishDiagnostics", diagnostics);
         } finally {
             await harness.shutdown();
         }
