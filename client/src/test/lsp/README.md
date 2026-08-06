@@ -28,12 +28,22 @@ tests do inherit it, and need to — `dev-setup-opam` passes their server its
 ## Layout
 
 * `harness.ts`: `LspHarness`, which spawns one `vsrocqtop` process per test,
-  completes the initialize handshake, and exposes `openDocument`,
-  `waitUntilChecked`, `sendConfiguration`, `shutdown`, plus the raw
-  `connection` (a `vscode-languageserver-protocol` `ProtocolConnection`) for
-  everything feature-specific. One process per test, not one shared server,
-  so a test can't observe another test's state. Also `compileFixture`, for
-  the fixtures described below.
+  completes the initialize handshake, and exposes `openDocument`, `applyEdit`,
+  `waitUntilChecked`, `waitUntilRechecked`, `waitForDiagnostics`, `waitUntil`,
+  `sendConfiguration`, `shutdown`, plus the raw `connection` (a
+  `vscode-languageserver-protocol` `ProtocolConnection`) for everything
+  feature-specific. One process per test, not one shared server, so a test
+  can't observe another test's state. Also `compileFixture`, for the fixtures
+  described below.
+
+  **Do not call `connection.onNotification` for
+  `prover/updateHighlights` or `textDocument/publishDiagnostics`.**
+  `vscode-jsonrpc` keeps one handler per method, so registering one there
+  silently replaces the harness's own: `waitUntilChecked` goes blind and times
+  out reporting `last prover/updateHighlights: undefined`. The harness tracks
+  both — use `onHighlights` to observe the highlight stream without displacing
+  anything, and `latestDiagnostics` / `waitForDiagnostics` for diagnostics.
+  Every other method is free.
 * `settings.ts`: the settings object sent as `initializationOptions`.
   `defaultSettings()` deviates from the extension's own defaults in two
   fields (`proof.mode: Continuous`, `proof.block: false`). See the
@@ -54,6 +64,14 @@ tests do inherit it, and need to — `dev-setup-opam` passes their server its
   that it is reaching them.
 * `smoke.test.ts`: the one test that isn't feature-specific. It proves the
   harness itself works end to end.
+* `didChange.test.ts`: the edit cycle. Structural rather than golden: what it
+  protects is that an edit is re-checked, that the diagnostic it introduces
+  appears and the one it repairs goes away, and that the last
+  `publishDiagnostics` reaches the client even when the document goes quiet
+  right after the edit. None of that is the exact content of a response, and
+  the post-edit diagnostics list is a bad thing to freeze anyway — the server
+  does not order it positionally. Its third case is skipped: it characterizes
+  V11, which is a server bug, and the fix belongs in its own commit.
 
 Structural tests live directly under `lsp/`; golden tests live under
 `lsp/golden/`. `npm run test:lsp` and `npm run test:lsp:golden` glob those
@@ -78,6 +96,48 @@ The predicate is only correct when `proof.block` is `false`
 at the first error and `processedRange` never reaches the end of the
 document. A test that turns `block` on will see `waitUntilChecked` time out
 by design, not by bug.
+
+### After an edit, use `waitUntilRechecked`
+
+The predicate above is also only correct on a document that has not been
+edited. `waitUntilChecked` returns *immediately* after a `didChange` and
+reports success while the server is still recomputing — finding V11. The
+`prover/updateHighlights` the server emits synchronously from
+`textDocumentDidChange` carries the pre-edit overview, shifted for the edit
+(`CheckingManager.shift_overview`) but not truncated at it, so
+`processedRange` still spans the whole document while `preparedRange` and
+`processingRange` are empty. Nothing in its contents distinguishes it from a
+genuine completion.
+
+What distinguishes it is *when* the server sends it: before it has scheduled
+any parsing or checking. So `waitUntilRechecked` waits in two stages — first
+for the server to report work in progress, which consumes the stale
+notification, then for the readiness predicate. The ordering comes from the
+server's control flow (`apply_text_edits`, then `update_view`, then the
+returned events), not from timing.
+
+Its first stage times out when the edit causes no work at all, on purpose: an
+edit that triggers no re-checking gives a caller nothing to wait for, and
+treating that as "re-checked" is how a test ends up asserting against the
+pre-edit state. Verified by making the server discard the edit — both
+edit-cycle tests fail there, on that stage, naming the stale `processedRange`.
+
+### Waiting for diagnostics is not the same as waiting
+
+Two measured traps, both of which make an obvious-looking wait vacuous:
+
+* A document with no errors publishes `[]` from the first instant, so
+  `d => d.length === 0` is satisfied before any work starts.
+* After a `didChange`, the server publishes `[]` when it *invalidates* the
+  edited sentences, ~20 ms before it finishes re-checking them. So the same
+  predicate is satisfied on a document that had an error and may be about to
+  have it again.
+
+Waiting for the *absence* of a diagnostic only means something once checking
+has been established to be over by other means. Asserting that an error is
+gone is better done against a positive end state (`didChange.test.ts`'s
+second test ends on two errors, not zero, for exactly this reason) or behind a
+request whose answer depends on the new text.
 
 ## Fixtures that need a compiled library
 
