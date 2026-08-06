@@ -96,6 +96,15 @@ let pp_event fmt = function
 let inject_em_event x = Sel.Event.map (fun e -> ExecutionManagerEvent e) x
 let inject_em_events events = List.map inject_em_event events
 let mk_interp_to_event mode tgt = [ Sel.now ~priority:PriorityManager.interp_to (InterpretTo (mode, tgt)) ]
+
+let is_interpretation = function
+  | InterpretTo _ -> true
+  | _ -> false
+
+let requeue = function
+  | InterpretTo (mode, tgt) -> mk_interp_to_event mode tgt
+  | _ -> []
+
 let mk_observe_event id = Sel.now ~priority:PriorityManager.execution (Observe id)
 
 let mk_move_cursor_event id =
