@@ -41,6 +41,14 @@ type state = {
   folding_entries_cache : DocumentEntries.entries option ref;
   feedback_pipe : feedback_pipe;
   pending_feedback : feedback_data list;
+  (* A navigation request that arrived while [document_state] was [Parsing],
+     held until the parse ends. Its target sentence is looked up in the
+     document, and the document holds no sentences at all until the parse
+     completes (they only reach [Document.sentences_by_end] in one go, from
+     [Document.handle_invalidate]), so handling one any earlier resolves it to
+     nothing and silently drops the request. Only the most recent one is kept:
+     "go to X" then "go to Y" means Y. *)
+  pending_interpretation : CheckingManager.event option;
   checking_state : CheckingManager.state;
 }
 type event =
@@ -290,7 +298,7 @@ let init init_vs ~opts uri ~text =
   let feedback_pipe, feedback_event = init_feedback_pipe ~doc_id in
   let checking_state = CheckingManager.init init_vs ~feedback_pipe in
   let parsebegin_event = Sel.now ~priority:PriorityManager.launch_parsing ParseBegin in
-  let state = { uri; opts; init_vs; document; document_state = Parsing; folding_entries_cache = ref None; feedback_pipe; pending_feedback = []; checking_state } in
+  let state = { uri; opts; init_vs; document; document_state = Parsing; folding_entries_cache = ref None; feedback_pipe; pending_feedback = []; pending_interpretation = None; checking_state } in
   state, [parsebegin_event;feedback_event]
 
 let reset { uri; opts; init_vs; document; checking_state; feedback_pipe } =
@@ -300,7 +308,7 @@ let reset { uri; opts; init_vs; document; checking_state; feedback_pipe } =
   let document = Document.create_document ~doc_id init_vs.synterp text in
   let feedback_pipe, feedback_event = init_feedback_pipe ~doc_id in
   let checking_state = CheckingManager.reset checking_state init_vs ~feedback_pipe in
-  let state = { uri; opts; init_vs; document; checking_state; document_state = Parsing; folding_entries_cache = ref None; feedback_pipe; pending_feedback = [] } in
+  let state = { uri; opts; init_vs; document; checking_state; document_state = Parsing; folding_entries_cache = ref None; feedback_pipe; pending_feedback = []; pending_interpretation = None } in
   let parsebegin_event = Sel.now ~priority:PriorityManager.launch_parsing ParseBegin in
   state, [parsebegin_event;feedback_event]
 
@@ -351,9 +359,18 @@ let handle_event ev st =
     | Some parsing_end_info ->
       let st = validate_document st parsing_end_info in
       let checking_state, events = CheckingManager.validate_document st.document st.checking_state in
-      let state = handle_feedback_events { st with checking_state; pending_feedback = [] } st.pending_feedback in
-      make_handled_event ~state ~events:(inject_im_events events) ~update_view:true ()
+      (* The document now has sentences, so a navigation request held back
+         while it did not can finally resolve its target. *)
+      let replayed = Option.cata CheckingManager.requeue [] st.pending_interpretation in
+      let state = handle_feedback_events
+        { st with checking_state; pending_feedback = []; pending_interpretation = None }
+        st.pending_feedback
+      in
+      make_handled_event ~state ~events:(inject_im_events (events @ replayed)) ~update_view:true ()
     end
+  | InteractionManagerEvent ev when is_parsing st && CheckingManager.is_interpretation ev ->
+    log (fun () -> Stdlib.Format.asprintf "deferring %a until parsing ends" CheckingManager.pp_event ev);
+    make_handled_event ~state:{ st with pending_interpretation = Some ev } ()
   | InteractionManagerEvent ev ->
     let updates, he = CheckingManager.handle_event ~uri:st.uri st.document st.checking_state ev in
     let st = { st with document = List.fold_left Document.update_checked st.document updates } in
