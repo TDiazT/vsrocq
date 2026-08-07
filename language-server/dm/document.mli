@@ -166,6 +166,15 @@ val range_of_id : document -> sentence_id -> Range.t
 val range_of_id_with_blank_space : document -> sentence_id -> Range.t
 (** [range_of_id_with_blank_space doc id] returns a Range object coressponding to the sentence id given in argument but with the white spaces before (until the previous sentence) *)
 
+val diags_version : document -> int
+(** [diags_version doc] is a counter that changes whenever something that can
+    alter the diagnostics the client sees changes: a checking error appearing
+    or disappearing, an Error/Warning feedback, a parse, or a shift of
+    positions. It deliberately ignores Info/Debug/Notice feedback, which is
+    filtered out before reaching the client unless diagnostics.full is set.
+    Callers can use it to skip recomputing and republishing diagnostics when
+    nothing changed -- collecting them walks the whole document. *)
+
 val all_feedback : document -> (sentence_id * feedback_message) list
 (** [all_feedback doc] returns all sentences with a feedback *)
 

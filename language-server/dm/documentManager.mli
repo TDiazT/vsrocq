@@ -107,6 +107,11 @@ val all_diagnostics : state -> Diagnostic.t list
 (** all_diagnostics [doc] returns the diagnostics corresponding to the sentences
     that have been executed in [doc]. *)
 
+val diags_version : state -> int
+(** [diags_version st] changes whenever [all_diagnostics] could return
+    something different under the default diagnostics settings. Lets callers
+    skip republishing when nothing changed; see [Document.diags_version]. *)
+
 val get_completions : state -> Position.t -> completion_item list 
 
 val handle_event : event -> state -> (state,event) handled_event
