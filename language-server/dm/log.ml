@@ -55,10 +55,13 @@ let logs = ref []
 
 let handle_event s = Printf.eprintf "%s\n" s
 
+let is_debug_enabled name =
+  is_enabled_env name (try Sys.getenv "VSROCQ_ARGS" with Not_found -> "")
+  || is_enabled name (Array.to_list Sys.argv)
+
 let mk_log name =
   logs := name :: !logs;
-  let flag = is_enabled_env name (try Sys.getenv "VSROCQ_ARGS" with Not_found -> "") in
-  let flag = flag || is_enabled name (Array.to_list Sys.argv) in
+  let flag = is_debug_enabled name in
   let flag_init = is_enabled "init" (Array.to_list Sys.argv) in
   write_to_init_log ("log fun () -> " ^ name ^ " is " ^ if flag then "on" else "off");
   Log (fun ?(force=false) msg ->

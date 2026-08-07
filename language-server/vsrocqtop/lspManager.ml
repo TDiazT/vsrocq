@@ -45,6 +45,27 @@ let full_messages = ref false
 
 let folding_line_count_cut_off = ref 3000
 
+(* The [Document.diags_version] of the last diagnostics published for each
+   document, so that update_view can skip a publication that would say nothing
+   new. See update_view for why that matters. *)
+let last_diags_version : (string, int) Hashtbl.t = Hashtbl.create 39
+
+(* Set by -vsrocq-d diags-version, off by default: it makes every skipped
+   publication pay the cost the skipping exists to avoid. See
+   audit_skipped_publication. *)
+let audit_diags_version = Dm.Log.is_debug_enabled "diags-version"
+
+(* Only populated when the audit above is on: the diagnostics of the last
+   publication, as they went on the wire. *)
+let last_published_diags : (string, Yojson.Safe.t list) Hashtbl.t = Hashtbl.create 39
+
+let forget_diagnostics path =
+  Hashtbl.remove last_diags_version path;
+  Hashtbl.remove last_published_diags path
+
+let forget_all_diagnostics () =
+  Hashtbl.reset last_diags_version;
+  Hashtbl.reset last_published_diags
 
 let Dm.Types.Log log = Dm.Log.mk_log "lspManager"
 
@@ -128,6 +149,11 @@ let do_configuration settings =
   full_diagnostics := settings.diagnostics.full;
   full_messages := settings.goals.messages.full;
   folding_line_count_cut_off := settings.folding.lineCountCutOff;
+  (* Which diagnostics are visible depends on these settings, so what was
+     published before this point says nothing about what should be published
+     after it: turning diagnostics.full off has to send a shorter list even
+     though no document changed. *)
+  forget_all_diagnostics ();
   max_memory_usage := settings.memory.limit * 1000000000;
   Dm.CheckingManager.set_options {
     Dm.CheckingManager.check_mode = settings.proof.mode;
@@ -193,12 +219,18 @@ let parse_loc json =
   let character = json |> member "character" |> to_int in
   Position.{ line ; character }
 
-let publish_diagnostics uri doc =
+(* The diagnostics of [doc] as the client would see them right now. Collecting
+   them walks the whole document. *)
+let visible_diagnostics doc =
   let diagnostics = Dm.DocumentManager.all_diagnostics doc in
-  let diagnostics =
-    if !full_diagnostics then diagnostics
-    else List.filter (fun d -> d.Diagnostic.severity != Some DiagnosticSeverity.Information) diagnostics
-  in
+  if !full_diagnostics then diagnostics
+  else List.filter (fun d -> d.Diagnostic.severity != Some DiagnosticSeverity.Information) diagnostics
+
+let publish_diagnostics uri doc =
+  let diagnostics = visible_diagnostics doc in
+  if audit_diags_version then
+    Hashtbl.replace last_published_diags (DocumentUri.to_path uri)
+      (List.map Diagnostic.yojson_of_t diagnostics);
   let params = Lsp.Types.PublishDiagnosticsParams.create ~diagnostics ~uri () in
   let diag_notification = Lsp.Server_notification.PublishDiagnostics params in
   output_notification (Std diag_notification)
@@ -238,10 +270,68 @@ let send_error_notification message =
   let notification = Lsp.Server_notification.ShowMessage params in
   output_json @@ Jsonrpc.Notification.yojson_of_t @@ Lsp.Server_notification.to_jsonrpc notification
 
+(* [Document.diags_version] is maintained by hand at six sites in
+   dm/document.ml. A seventh added later that forgets to bump it would leave
+   the client holding a diagnostic that no longer matches the document, with
+   nothing to say so.
+
+   Under -vsrocq-d diags-version we recompute the diagnostics on every skipped
+   publication and check that they really did not change. That is precisely
+   the O(n) work the skipping exists to avoid, which is why it is off by
+   default; what it buys is a check whose coverage comes from every test that
+   drives a document, present and future, rather than from one hand-written
+   sequence.
+
+   It is not a proof. A mutation site added later that no test ever reaches
+   stays invisible to it. The real guarantee would be structural -- putting
+   the publishable state behind an abstract type in dm/ so that the compiler
+   rejects any mutation that bypasses a bumping function -- and is the
+   escalation to take if this ever fires in anger.
+
+   The comparison is on the serialised form, which is both what actually goes
+   on the wire and free of the functional values that make structural equality
+   on Diagnostic.t unsafe. *)
+let audit_skipped_publication path st =
+  match Hashtbl.find_opt last_published_diags path with
+  | None -> ()
+  | Some published ->
+    let current = List.map Diagnostic.yojson_of_t (visible_diagnostics st) in
+    if current <> published then begin
+      let show ds = String.concat "\n  " (List.map (Yojson.Safe.to_string ~std:true) ds) in
+      let message = Printf.sprintf
+        "diags_version did not move but the diagnostics of %s did. Some \
+         mutation in dm/document.ml is missing its bump of diags_version.\n\
+         last published:\n  %s\nnow:\n  %s"
+        path (show published) (show current)
+      in
+      log ~force:true (fun () -> message);
+      failwith message
+    end
+
+(* update_view runs once per executed sentence, and publish_diagnostics
+   collects the diagnostics of the WHOLE document on every call
+   (Document.all_feedback and all_checking_errors each walk sentences_by_id in
+   full), which makes a complete check quadratic in the number of sentences.
+   Measured on a file of 20.000 Definitions, Stdlib.Map.bindings was the top
+   entry of the CPU profile.
+
+   The set of diagnostics almost never differs between one sentence and the
+   next -- the vast majority check without an error -- so it is enough not to
+   republish when nothing changed. Document.diags_version counts exactly those
+   changes. With diagnostics.full set that counter is not enough, since then
+   the Info/Notice messages it deliberately ignores are shown too, so in that
+   mode we publish every time, as before. *)
 let update_view uri st =
   if (Dm.ExecutionManager.is_diagnostics_enabled ()) then (
     send_highlights uri st;
-    publish_diagnostics uri st;
+    let path = DocumentUri.to_path uri in
+    let v = Dm.DocumentManager.diags_version st in
+    if !full_diagnostics || Hashtbl.find_opt last_diags_version path <> Some v
+    then begin
+      Hashtbl.replace last_diags_version path v;
+      publish_diagnostics uri st
+    end else if audit_diags_version then
+      audit_skipped_publication path st
   )
 
 let replace_state path st visible = Hashtbl.replace states path { st; visible}
@@ -354,6 +444,10 @@ let textDocumentDidClose params =
   | None -> log (fun () -> "[textDocumentDidClose] closed document with no state")
   | Some { st } -> replace_state path st false
   end;
+  (* The tab survives as invisible, but nothing is published for it while it
+     is closed, so there is no reason to keep remembering what was. Otherwise
+     this grows by one entry per document opened, for the life of the process. *)
+  forget_diagnostics path;
   consider_purge_invisible_tabs ();
   [] (* TODO handle properly *)
 

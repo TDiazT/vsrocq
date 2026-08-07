@@ -75,6 +75,26 @@ type sentence = {
 
 type document = {
   sentences_by_id : sentence SM.t;
+  (* Bumped whenever something changes that can alter the diagnostics the
+     client sees under the default settings: a checking error appearing or
+     disappearing, an Error or Warning feedback, a parse, or a shift of
+     positions. It deliberately does NOT count Info/Debug/Notice feedback --
+     the "X is defined" every sentence emits -- because that is filtered out
+     before reaching the client unless diagnostics.full is set, and counting
+     it would mark the document as changed at every single sentence, which is
+     exactly what this is here to avoid.
+
+     It exists so that lspManager can skip publishing diagnostics when
+     nothing changed: collecting them walks the whole document, and
+     update_view runs once per executed sentence, which makes a full check
+     quadratic in the number of sentences.
+
+     The counter is maintained by hand, at every site below that touches
+     `checked`, `messages` or the sentence positions. Adding a mutation that
+     forgets to bump it leaves the client with a stale diagnostic and no
+     signal; `-vsrocq-d diags-version` turns on a check in lspManager that
+     catches exactly that (see `audit_skipped_publication` there). *)
+  diags_version : int;
   sentences_by_end : sentence_id LM.t;
   parsing_errors_by_end : parsing_error LM.t;
   comments_by_end : comment LM.t;
@@ -158,6 +178,7 @@ let schedule doc = doc.schedule
 
 let raw_document doc = doc.raw_doc
 
+let diags_version doc = doc.diags_version
 let parse_errors parsed =
   List.map snd (LM.bindings parsed.parsing_errors_by_end)
 
@@ -186,8 +207,14 @@ let remove_sentence parsed id =
   | Some sentence ->
     let sentences_by_id = SM.remove id parsed.sentences_by_id in
     let sentences_by_end = LM.remove sentence.stop parsed.sentences_by_end in
+    (* if the sentence being dropped carried an error, a diagnostic goes away *)
+    let diags_version =
+      match sentence.checked with
+      | Some (Failure _) -> parsed.diags_version + 1
+      | _ -> parsed.diags_version
+    in
     (* TODO clean up the schedule and free cached states *)
-    { parsed with sentences_by_id; sentences_by_end }
+    { parsed with sentences_by_id; sentences_by_end; diags_version }
 
 let sentences parsed =
   List.map snd @@ SM.bindings parsed.sentences_by_id
@@ -371,22 +398,39 @@ let is_qed = function
      not completed. Here we double check this invariant. *)
   | _ -> false
 
+let is_failure = function Some (Failure _) -> true | _ -> false
+
+(* A change to `checked` moves the diagnostics only if the sentence's error
+   status differs before and after. Going from None to Success -- what happens
+   to the vast majority of sentences -- changes nothing the client sees. *)
+let bump_if_error_changed ~before ~after parsed =
+  if is_failure before = is_failure after then parsed
+  else { parsed with diags_version = parsed.diags_version + 1 }
+
 let update_checked parsed (id, v) =
   match SM.find_opt id parsed.sentences_by_id with
   | None -> parsed
   | Some ({ checked; ast } as s) ->
-      match checked with
-      | None | Some (Failure _)->
-          { parsed with sentences_by_id = SM.add id { s with checked = Some v} parsed.sentences_by_id }
-      | Some (Success _) when is_qed ast ->
-          { parsed with sentences_by_id = SM.add id { s with checked = Some v} parsed.sentences_by_id }
-      | _ -> log (fun () -> "Ignoring bad update for checked status, possibly a bug"); parsed
+      let accept =
+        match checked with
+        | None | Some (Failure _) -> true
+        | Some (Success _) -> is_qed ast
+      in
+      if not accept then begin
+        log (fun () -> "Ignoring bad update for checked status, possibly a bug");
+        parsed
+      end else
+        let parsed =
+          { parsed with sentences_by_id = SM.add id { s with checked = Some v} parsed.sentences_by_id } in
+        bump_if_error_changed ~before:checked ~after:(Some v) parsed
 
 let set_unchecked parsed id =
   match SM.find_opt id parsed.sentences_by_id with
   | None -> parsed
   | Some s ->
-    { parsed with sentences_by_id = SM.add id { s with checked = None } parsed.sentences_by_id }
+    let parsed =
+      { parsed with sentences_by_id = SM.add id { s with checked = None } parsed.sentences_by_id } in
+    bump_if_error_changed ~before:s.checked ~after:None parsed
 
 let is_checked parsed id =
   match SM.find_opt id parsed.sentences_by_id with
@@ -399,7 +443,16 @@ let append_feedback parsed id (_, _, _, msg as fb) =
     log (fun () -> "Received feedback on non-existing state id " ^ Stateid.to_string id ^ ": " ^ Pp.string_of_ppcmds msg);
     parsed
   | Some s ->
-      { parsed with sentences_by_id = SM.add id { s with messages = s.messages @ [fb] } parsed.sentences_by_id }
+      let (lvl, _, _, _) = fb in
+      let parsed =
+        { parsed with sentences_by_id = SM.add id { s with messages = s.messages @ [fb] } parsed.sentences_by_id } in
+      (* Info/Debug/Notice are filtered out before reaching the client unless
+         diagnostics.full is set, so they do not count as a change. *)
+      begin match lvl with
+      | Feedback.(Error | Warning) ->
+        { parsed with diags_version = parsed.diags_version + 1 }
+      | Feedback.(Info | Debug | Notice) -> parsed
+      end
 
 let shift_sentence ~start ~offset s =
   let messages = CList.Smart.map (Utilities.shift_feedback ~start ~offset) s.messages in
@@ -408,7 +461,10 @@ let shift_sentence ~start ~offset s =
   else { s with messages; checked }
 
 let shift_feedbacks_and_checking_errors ~start ~offset parsed =
-  { parsed with sentences_by_id = SM.map (shift_sentence ~start ~offset) parsed.sentences_by_id }
+  (* Shifting positions changes the ranges that get published, so it counts as
+     a change even when the set of diagnostics is the same. *)
+  { parsed with sentences_by_id = SM.map (shift_sentence ~start ~offset) parsed.sentences_by_id;
+                diags_version = parsed.diags_version + 1 }
 
 let string_of_parsed_ast { tokens } =
   (* TODO implement printer for vernac_entry *)
@@ -777,7 +833,13 @@ let handle_invalidate {parsed; errors; parsed_comments; stop; top_id; started; p
     List.fold_left (fun acc (comment : comment) -> LM.add comment.stop comment acc) comments new_comments
   in
   let parsed_loc = pos_at_end document in
-  let parsed_document = {document with parsed_loc; parsing_errors_by_end; comments_by_end} in
+  (* Parsing errors are diagnostics too, and they are rebuilt once per parse,
+     so counting a change unconditionally here costs nothing measurable. This
+     also covers patch_sentence, which invalidate calls to move an existing
+     sentence's positions: the range of a diagnostic on it is derived from
+     those. *)
+  let parsed_document = {document with parsed_loc; parsing_errors_by_end; comments_by_end;
+                         diags_version = document.diags_version + 1} in
   Some {parsed_document; unchanged_id; invalid_ids; previous_document}
 
 let handle_event document = function
@@ -798,6 +860,7 @@ let create_document ~doc_id init_synterp_state text =
       parsed_loc = -1;
       raw_doc;
       sentences_by_id = SM.empty;
+      diags_version = 0;
       sentences_by_end = LM.empty;
       parsing_errors_by_end = LM.empty;
       comments_by_end = LM.empty;

@@ -110,3 +110,57 @@ let %test_unit "document: expand sentence" =
   let r1,(r2,()) = d_sentences parsed_document (P(P(O))) in
   [%test_eq: sentence_id] s1.id r1.id;
   ()
+(* [Document.diags_version] is what lets lspManager skip a publication that
+   would tell the client nothing new; the comment on the field in document.ml
+   says why that is worth doing. What follows pins down the transitions it has
+   to tell apart.
+
+   As a guard it is weak: it only sees the sequence it drives itself, so a
+   mutation added to document.ml later, at a site nobody thought of here, goes
+   unnoticed. The check behind `-vsrocq-d diags-version` in lspManager is what
+   covers those. *)
+
+let unchanged ~before doc =
+  [%test_eq: int] before (Document.diags_version doc);
+  doc
+
+let moved ~before doc =
+  [%test_pred: int] (fun v -> not (Int.equal before v)) (Document.diags_version doc);
+  doc
+
+let %test_unit "document: diags_version moves when a checking error appears or goes away" =
+  let Document.{parsed_document} = init_and_parse_test_doc () ~text:"Definition x := 3. Definition y := 4." in
+  let s1,(s2,()) = d_sentences parsed_document (P(P(O))) in
+  let failed = Failure ((None, Pp.str "boom"), None, None) in
+  (* Checking a sentence that turns out fine is what happens to the vast
+     majority of them, and publishes nothing. *)
+  let before = Document.diags_version parsed_document in
+  let doc = unchanged ~before @@ Document.update_checked parsed_document (s2.id, Success None) in
+  (* An error appearing, and then going away on a re-check. *)
+  let doc = moved ~before @@ Document.update_checked doc (s1.id, failed) in
+  let before = Document.diags_version doc in
+  let doc = moved ~before @@ Document.update_checked doc (s1.id, Success None) in
+  (* Dropping the result of a sentence that had no error retracts nothing. *)
+  let before = Document.diags_version doc in
+  let doc = unchanged ~before @@ Document.set_unchecked doc s1.id in
+  (* Dropping the result of one that had an error does. *)
+  let doc = Document.update_checked doc (s1.id, failed) in
+  let before = Document.diags_version doc in
+  let _ = moved ~before @@ Document.set_unchecked doc s1.id in
+  ()
+
+let %test_unit "document: diags_version counts Error and Warning feedback, not Info" =
+  let Document.{parsed_document} = init_and_parse_test_doc () ~text:"Definition x := 3." in
+  let s1,() = d_sentences parsed_document (P(O)) in
+  let message lvl : feedback_message = (lvl, None, [], Pp.str "message") in
+  (* Info is the "x is defined" every sentence emits. It is filtered out before
+     it reaches the client, so counting it would mark the document as changed
+     at every single sentence -- which is the whole thing being avoided. *)
+  let before = Document.diags_version parsed_document in
+  let doc = unchanged ~before @@ Document.append_feedback parsed_document s1.id (message Feedback.Info) in
+  let doc = unchanged ~before @@ Document.append_feedback doc s1.id (message Feedback.Notice) in
+  let doc = unchanged ~before @@ Document.append_feedback doc s1.id (message Feedback.Debug) in
+  let doc = moved ~before @@ Document.append_feedback doc s1.id (message Feedback.Warning) in
+  let before = Document.diags_version doc in
+  let _ = moved ~before @@ Document.append_feedback doc s1.id (message Feedback.Error) in
+  ()

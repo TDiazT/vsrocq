@@ -17,6 +17,12 @@ open Types
 val mk_log : string -> (?force:bool -> (unit -> string) -> unit) log
 val logs : unit -> string list
 
+val is_debug_enabled : string -> bool
+(** [is_debug_enabled name] tells whether [name] was selected by -vsrocq-d or
+    by VSROCQ_ARGS, using the same matching as [mk_log]. For debugging work
+    that is more than printing a message -- a check too expensive to leave on
+    -- and so needs the flag as a plain boolean. *)
+
 type event = string
 type events = event Sel.Event.t list
 
