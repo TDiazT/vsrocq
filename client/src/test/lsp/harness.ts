@@ -208,6 +208,14 @@ export async function compileFixture(
     });
 }
 
+/** How the server process ended, recorded as soon as it does. */
+interface ServerExit {
+    code: number | null;
+    signal: NodeJS.Signals | null;
+    /** Time from spawn to exit, in milliseconds. */
+    afterMs: number;
+}
+
 /**
  * Drives one `vsrocqtop` process over stdio for the lifetime of a single
  * test. See `docs/adr/0001-protocol-level-test-safety-net.md` for why this
@@ -222,6 +230,8 @@ export class LspHarness {
     > = [];
     private readonly waiters = new Set<() => void>();
     private nextVersion = 1;
+    private readonly startedAt = Date.now();
+    private exit: ServerExit | undefined;
 
     /**
      * Exposed directly (rather than wrapped) so that feature-specific tests
@@ -260,6 +270,96 @@ export class LspHarness {
         }
     }
 
+    /**
+     * One clause describing the server process as it stands, for use in the
+     * message of anything that gives up waiting on it.
+     *
+     * The distinction it draws — dead, and with which signal, versus alive and
+     * not answering — is the whole point. Without it both arrive as the same
+     * class of failure, and telling them apart was the crux of three separate
+     * investigations into the SIGBUS crash before this existed.
+     */
+    private serverStatus(): string {
+        if (this.exit === undefined) {
+            return `vsrocqtop (pid ${this.child.pid}) is still running`;
+        }
+        const elapsed = `after ${(this.exit.afterMs / 1000).toFixed(1)}s`;
+        return this.exit.signal !== null
+            ? `vsrocqtop died with ${this.exit.signal} ${elapsed}`
+            : `vsrocqtop exited with code ${this.exit.code} ${elapsed}`;
+    }
+
+    /**
+     * Whether the server process is still alive, allowing a moment for an
+     * exit that has happened but not yet been reported to this process.
+     *
+     * Exposed for `harness.test.ts`, which asserts on what the harness itself
+     * does; a feature test has no use for it.
+     */
+    async isRunning(): Promise<boolean> {
+        return !(await this.waitForExit(500));
+    }
+
+    /**
+     * Resolves `true` once the server process has ended, or `false` if it is
+     * still running `timeoutMs` later.
+     */
+    private waitForExit(timeoutMs: number): Promise<boolean> {
+        if (this.exit !== undefined) {
+            return Promise.resolve(true);
+        }
+        return new Promise((resolve) => {
+            const onExit = () => {
+                clearTimeout(timer);
+                resolve(true);
+            };
+            const timer = setTimeout(() => {
+                this.child.off("exit", onExit);
+                resolve(false);
+            }, timeoutMs);
+            this.child.once("exit", onExit);
+        });
+    }
+
+    /**
+     * `promise`, but rejecting once `timeoutMs` has passed with no answer.
+     *
+     * The underlying promise is left pending rather than cancelled — nothing
+     * in `vscode-jsonrpc` can withdraw a request that was already written to
+     * the server. It holds no timer of its own, so it cannot keep the process
+     * alive; and its eventual rejection when the connection is disposed is
+     * absorbed by the handlers attached here rather than surfacing as an
+     * unhandled rejection.
+     */
+    private withDeadline<T>(
+        promise: Promise<T>,
+        timeoutMs: number,
+        what: string,
+    ): Promise<T> {
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(
+                () =>
+                    reject(
+                        new Error(
+                            `${what} went unanswered for ${timeoutMs}ms; ` +
+                                this.serverStatus(),
+                        ),
+                    ),
+                timeoutMs,
+            );
+            promise.then(
+                (value) => {
+                    clearTimeout(timer);
+                    resolve(value);
+                },
+                (error) => {
+                    clearTimeout(timer);
+                    reject(error);
+                },
+            );
+        });
+    }
+
     /** Spawns the server, completes the LSP handshake, and returns a ready harness. */
     static async start(
         settings: Settings = defaultSettings(),
@@ -271,6 +371,19 @@ export class LspHarness {
 
         const connection = createProtocolConnection(child.stdout, child.stdin);
         const harness = new LspHarness(child, connection);
+
+        // Recorded rather than acted on: a server death is reported by
+        // whichever wait or request is left with nothing to wait for, which is
+        // where the test actually is. Waking the waiters is what lets them do
+        // that at once instead of sitting out their full timeout first.
+        child.once("exit", (code, signal) => {
+            harness.exit = {
+                code,
+                signal,
+                afterMs: Date.now() - harness.startedAt,
+            };
+            harness.wakeWaiters();
+        });
 
         connection.onRequest(ConfigurationRequest.type, (params) =>
             // vsrocqtop sends `workspace/configuration` once, right after
@@ -301,13 +414,26 @@ export class LspHarness {
 
         connection.listen();
 
-        await connection.sendRequest(InitializeRequest.type, {
-            processId: process.pid,
-            rootUri: null,
-            capabilities: {},
-            initializationOptions: settings,
-        });
-        await connection.sendNotification(InitializedNotification.type, {});
+        try {
+            await connection.sendRequest(InitializeRequest.type, {
+                processId: process.pid,
+                rootUri: null,
+                capabilities: {},
+                initializationOptions: settings,
+            });
+            await connection.sendNotification(InitializedNotification.type, {});
+        } catch (error) {
+            // A server that dies during the handshake — a `vsrocqtop` built
+            // against the wrong Rocq, say — closes the connection, and
+            // `Connection is closed` on its own does not say that a process
+            // died, let alone of what. The wait is for the `exit` event to
+            // catch up with the closed stream, and is bounded because the
+            // connection can also close on a server that stays alive.
+            await harness.waitForExit(1000);
+            throw new Error(
+                `The LSP handshake failed: ${error}; ${harness.serverStatus()}`,
+            );
+        }
 
         return harness;
     }
@@ -410,7 +536,13 @@ export class LspHarness {
      * `prover/updateHighlights` and `textDocument/publishDiagnostics` the
      * harness receives — never on a timer. A test built on this cannot pass
      * because a machine was fast enough; only an actual server notification
-     * can advance it. `describe` is only called to build the timeout message.
+     * can advance it. `describe` is only called to build the failure message.
+     *
+     * A server that has died ends the wait immediately, naming the signal,
+     * rather than letting it run out the clock: nothing further can arrive
+     * over a closed connection, and `Timed out after 10000ms` says none of
+     * that. The poll is still evaluated first each time, so notifications that
+     * arrived before the process ended are not lost to the race.
      */
     waitUntil<T>(
         poll: () => T | undefined,
@@ -421,23 +553,41 @@ export class LspHarness {
         if (immediate !== undefined) {
             return Promise.resolve(immediate);
         }
+        if (this.exit !== undefined) {
+            return Promise.reject(
+                new Error(`${this.serverStatus()}, waiting for ${describe()}`),
+            );
+        }
 
         return new Promise((resolve, reject) => {
-            const wake = () => {
-                const value = poll();
-                if (value === undefined) {
-                    return;
-                }
+            const settle = () => {
                 clearTimeout(timer);
                 this.waiters.delete(wake);
-                resolve(value);
+            };
+
+            const wake = () => {
+                const value = poll();
+                if (value !== undefined) {
+                    settle();
+                    resolve(value);
+                    return;
+                }
+                if (this.exit !== undefined) {
+                    settle();
+                    reject(
+                        new Error(
+                            `${this.serverStatus()}, waiting for ${describe()}`,
+                        ),
+                    );
+                }
             };
 
             const timer = setTimeout(() => {
                 this.waiters.delete(wake);
                 reject(
                     new Error(
-                        `Timed out after ${timeoutMs}ms waiting for ${describe()}`,
+                        `Timed out after ${timeoutMs}ms waiting for ` +
+                            `${describe()}; ${this.serverStatus()}`,
                     ),
                 );
             }, timeoutMs);
@@ -587,22 +737,72 @@ export class LspHarness {
         );
     }
 
-    /** Sends `shutdown` then `exit`, and waits for the process to actually end. */
-    async shutdown(timeoutMs = 5000): Promise<void> {
-        await this.connection.sendRequest(ShutdownRequest.type);
-        await this.connection.sendNotification(ExitNotification.type);
+    /**
+     * Sends `shutdown` then `exit`, waits for the process to actually end,
+     * and kills it if it will not.
+     *
+     * Every test calls this from a `finally`, which constrains what it may
+     * throw: an error raised here replaces the one the test was already
+     * failing with. So a server that has *died* is not reported from here at
+     * all — the wait or request that first found the connection closed says
+     * so, with the signal, from where the test actually was. This used to
+     * throw `Connection is closed` over that.
+     *
+     * A server that is alive and no longer answering is reported to `report`
+     * instead of thrown, for the same reason. Before the deadline below,
+     * `shutdown` waited on a reply that would never come: the test had already
+     * failed on mocha's own timeout, but the run never finished, and since npm
+     * buffers a workspace script until it exits, `npm run test:lsp` printed
+     * nothing at all — not the suite, not the test name, not the failure.
+     * Killing the child is what ends the run. Throwing on top of that would
+     * hand mocha a second outcome for a test it has already finished, which it
+     * answers with `ERR_MOCHA_MULTIPLE_DONE` — and that aborts the process,
+     * taking the remaining test files with it. The test that provoked the
+     * wedge is named by its own failure; this line says what became of the
+     * server afterwards.
+     */
+    async shutdown(
+        timeoutMs = 2000,
+        report: (message: string) => void = (message) =>
+            process.stderr.write(message),
+    ): Promise<void> {
+        let wedged = false;
 
-        await new Promise<void>((resolve) => {
-            const timer = setTimeout(() => {
-                this.child.kill();
-                resolve();
-            }, timeoutMs);
-            this.child.once("exit", () => {
-                clearTimeout(timer);
-                resolve();
-            });
-        });
+        if (this.exit === undefined) {
+            try {
+                await this.withDeadline(
+                    this.connection.sendRequest(ShutdownRequest.type),
+                    timeoutMs,
+                    "`shutdown`",
+                );
+                await this.connection.sendNotification(ExitNotification.type);
+            } catch {
+                // Either the connection closed while we were asking, or the
+                // request went unanswered. Which of the two it was is settled
+                // by whether the process is gone, below.
+            }
+
+            wedged = !(await this.waitForExit(timeoutMs));
+            if (wedged) {
+                // SIGKILL rather than SIGTERM: a server that ignored
+                // `shutdown` has already shown that it is not going to run
+                // anything, and a second thing to wait for is the last thing
+                // this needs.
+                this.child.kill("SIGKILL");
+                await this.waitForExit(timeoutMs);
+            }
+        }
 
         this.connection.dispose();
+
+        if (wedged) {
+            report(
+                `\nvsrocqtop did not answer \`shutdown\` within ${timeoutMs}ms ` +
+                    `and was still running, so the harness killed it with ` +
+                    `SIGKILL. The server was wedged, not dead: a stack ` +
+                    `overflow on the prover thread can leave it spinning at ` +
+                    `100% CPU (see dm/proverThreadStubs.c).\n`,
+            );
+        }
     }
 }
