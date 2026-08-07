@@ -2,6 +2,7 @@
  (name dm)
  (public_name vsrocq-language-server.dm)
  (modules :standard \ vsrocqtop_proof_worker vsrocqtop_tactic_worker)
+ (foreign_stubs (language c) (names proverThreadStubs))
  (instrumentation (backend bisect_ppx))
  (preprocess (pps ppx_optcomp -- -cookie "ppx_optcomp.env=env ~rocq:(Defined \"@@ROCQVERSION@@\")"))
  (preprocessor_deps vsrocq_config.mlh)
