@@ -55,8 +55,31 @@ let jobs : jobs = { running = None; queue = Queue.create () }
 let jobs_mutex = Mutex.create ()
 let jobs_condition = Condition.create ()
 
-let _runner =
-  Thread.create
+(* Rocq's pretyper recurses once per level of nesting in the term it
+   elaborates, so the stack this thread gets bounds how deep a term the server
+   can check. Thread.create leaves that size to the platform: Linux hands out
+   8 MB, the same as the main thread, but macOS hands out 512 KB, and there
+   the budget runs out at roughly 950 levels -- [Definition x : nat := 1000.]
+   is already past it, since the numeral elaborates to 1000 nested [S]. The
+   overflow is not survivable either: OCaml installs its stack-overflow
+   handler for SIGSEGV, but macOS reports a secondary thread hitting its guard
+   page as SIGBUS, so the whole server dies with no diagnostic and no log
+   entry. Ask for the 8 MB the main thread gets, which is what the platforms
+   without this problem already hand out, and which puts the ceiling exactly
+   where `rocq compile` has it: both give up between 2000 and 3000 levels,
+   measured. Past that the file does not compile either, so there is little to
+   gain from going higher. *)
+let stack_size_mb = 8
+
+external create_with_stack : int -> (unit -> unit) -> bool
+  = "vsrocq_thread_create_with_stack"
+
+let spawn f =
+  if not (create_with_stack stack_size_mb f) then
+    ignore (Thread.create f () : Thread.t)
+
+let () =
+  spawn
     (fun () ->
       while true do
         (* get a job *)
@@ -92,7 +115,6 @@ let _runner =
             Mutex.unlock jobs_mutex
 
       done)
-    ()
 
 let interrupt_job_if ~doc_id (Job(id,_,_,_,token,_)) = if id = doc_id then Memprof_limits.Token.set token
 
