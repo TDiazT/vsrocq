@@ -70,8 +70,8 @@ tests do inherit it, and need to — `dev-setup-opam` passes their server its
   `publishDiagnostics` reaches the client even when the document goes quiet
   right after the edit. None of that is the exact content of a response, and
   the post-edit diagnostics list is a bad thing to freeze anyway — the server
-  does not order it positionally. Its third case is skipped: it characterizes
-  V11, which is a server bug, and the fix belongs in its own commit.
+  does not order it positionally. Its third case is the regression test for
+  V11, written against the bug and unskipped by the fix.
 
 Structural tests live directly under `lsp/`; golden tests live under
 `lsp/golden/`. `npm run test:lsp` and `npm run test:lsp:golden` glob those
@@ -99,28 +99,26 @@ by design, not by bug.
 
 ### After an edit, use `waitUntilRechecked`
 
-The predicate above is also only correct on a document that has not been
-edited. `waitUntilChecked` returns *immediately* after a `didChange` and
-reports success while the server is still recomputing — finding V11. The
-`prover/updateHighlights` the server emits synchronously from
-`textDocumentDidChange` carries the pre-edit overview, shifted for the edit
-(`CheckingManager.shift_overview`) but not truncated at it, so
-`processedRange` still spans the whole document while `preparedRange` and
-`processingRange` are empty. Nothing in its contents distinguishes it from a
-genuine completion.
+It waits in two stages: first for the server to report work in progress, and
+only then for the predicate above.
 
-What distinguishes it is *when* the server sends it: before it has scheduled
-any parsing or checking. So `waitUntilRechecked` waits in two stages — first
-for the server to report work in progress, which consumes the stale
-notification, then for the readiness predicate. The ordering comes from the
-server's control flow (`apply_text_edits`, then `update_view`, then the
-returned events), not from timing.
+The first stage was originally the only thing that made waiting after an edit
+trustworthy at all. `waitUntilChecked` used to return *immediately* after a
+`didChange` and report success while the server was still recomputing (finding
+V11): the `prover/updateHighlights` emitted synchronously from
+`textDocumentDidChange` carried the pre-edit overview, shifted for the edit but
+not truncated at it, so `processedRange` still spanned the whole document with
+the other two lists empty. Nothing in its contents distinguished it from a
+genuine completion; what did was *when* the server sent it, before scheduling
+any parsing or checking, so waiting for progress first consumed it.
 
-Its first stage times out when the edit causes no work at all, on purpose: an
-edit that triggers no re-checking gives a caller nothing to wait for, and
-treating that as "re-checked" is how a test ends up asserting against the
-pre-edit state. Verified by making the server discard the edit — both
-edit-cycle tests fail there, on that stage, naming the stale `processedRange`.
+That is fixed — `CheckingManager.truncate_overview` — and the first
+notification after an edit now reports the document as checked only up to the
+edit. Both stages stay anyway. The first fails loudly when an edit causes no
+work at all, instead of letting a caller treat that as "re-checked" and assert
+against the pre-edit state; and it is what would catch the truncation
+regressing. Verified by making the server discard the edit: both edit-cycle
+tests fail there, on that stage, naming the stale `processedRange`.
 
 ### Waiting for diagnostics is not the same as waiting
 

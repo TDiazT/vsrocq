@@ -47,11 +47,13 @@ function positionOf(text: string, needle: string): Position {
  * diagnostics are published — the `spike/diagnostics-*` branches both rewrite
  * exactly this path — stops the client from ever hearing the final state.
  *
- * All waiting after an edit goes through `waitUntilRechecked`, never
- * `waitUntilChecked`: the latter returns immediately after a `didChange` and
- * reports success while the server is still recomputing (finding V11). See its
- * docstring in `harness.ts` for why the two-stage version is not vulnerable to
- * that. The last test here is the one that characterizes V11 itself.
+ * All waiting after an edit goes through `waitUntilRechecked` rather than
+ * `waitUntilChecked`. That started as the only way to get a trustworthy answer
+ * at all — `waitUntilChecked` used to return immediately after a `didChange`
+ * and report success while the server was still recomputing, finding V11 — and
+ * stays because it also fails loudly on an edit that triggers no work, instead
+ * of quietly asserting against the pre-edit state. The last test here is the
+ * regression test for V11.
  */
 describe("textDocument/didChange", () => {
     it("re-checks after an edit: an introduced error appears, and a second edit clears it", async function () {
@@ -222,31 +224,28 @@ describe("textDocument/didChange", () => {
         }
     });
 
-    // Finding V11, unfixed. Kept as a written test rather than a note: it is
-    // the shape a fix has to satisfy, and that fix is a change to
-    // `DocumentManager.apply_text_edits` that belongs in its own commit.
+    // Regression test for V11: the server used to report the pre-edit
+    // `processedRange` as complete while it was still re-checking. Written
+    // against the bug first, then unskipped by the fix in
+    // `CheckingManager.truncate_overview`.
     //
     // The scenario is built so that the notification under test cannot be
     // mistaken for anything else. The edit inserts a whole line, so the end of
     // the document moves from line N to line N+1, and `shift_overview` shifts
-    // the stale `processedRange` along with it. The offending notification
-    // therefore reports a `processedRange` ending at the *new* end of the
-    // document — a value that did not exist before the edit, so it cannot be
-    // one of the duplicate terminal notifications the server repeats with
-    // identical payloads (V6). Measured on this fixture:
-    // `prep=[] proc=[] done=[0:0-26:28]` 1ms after the `didChange`, then
-    // `prep=[0:0-26:28] proc=[] done=[0:0-24:24]` 3ms later — work still to do
-    // on a document the server had just described as finished.
+    // the overview along with it. Before the fix the resulting notification
+    // reported a `processedRange` ending at the *new* end of the document — a
+    // value that did not exist beforehand, so it could not be one of the
+    // duplicate terminal notifications the server repeats with identical
+    // payloads (V6). Measured on this fixture, before and after:
     //
-    // To fix: `apply_text_edits` shifts the overview but does not truncate it
-    // at the edit. Truncating there — dropping, in all three lists, everything
-    // at or after the edit's start position — would make this notification
-    // report the document as checked only up to the edit, which is true. The
-    // truncated overview does get built later, by `reset_overview` when
-    // parsing ends, which is why the state eventually becomes correct; the bug
-    // is confined to the window before that, and that window is exactly where
-    // a client decides whether to believe the document is ready.
-    it.skip("does not report the document as fully checked while it is still re-checking", async function () {
+    //   before:  prep=[] proc=[] done=[0:0-26:28]   <- the whole document
+    //   after:   prep=[] proc=[] done=[0:0-21:0]    <- up to the edit
+    //
+    // and in both cases followed ~3ms later by a notification with a non-empty
+    // `preparedRange`, i.e. work still to do. That second notification is what
+    // the wait below establishes, so that this test cannot pass by being
+    // evaluated before the server has said anything.
+    it("does not report the document as fully checked while it is still re-checking", async function () {
         this.timeout(60000); // See the note on the first test.
 
         const harness = await LspHarness.start();
