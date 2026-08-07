@@ -74,7 +74,14 @@ let stack_size_mb = 8
 external create_with_stack : int -> (unit -> unit) -> bool
   = "vsrocq_thread_create_with_stack"
 
+(* Makes an overflow on this thread a sentence error instead of a signal that
+   kills the server. macOS only, and only half the story -- the other half is
+   in the trampoline; see proverThreadStubs.c for both. *)
+external report_thread_stack_overflow : unit -> unit
+  = "vsrocq_report_thread_stack_overflow"
+
 let spawn f =
+  report_thread_stack_overflow ();
   if not (create_with_stack stack_size_mb f) then
     ignore (Thread.create f () : Thread.t)
 

@@ -21,7 +21,12 @@
 
    Returns false without doing anything if the platform is not pthread-based
    or the thread could not be created, so the caller can fall back to
-   Thread.create. */
+   Thread.create.
+
+   Two things below are about what happens when that stack runs out anyway,
+   which no size prevents: an unbounded recursion reaches any guard page. Both
+   have to hold for the overflow to arrive as a catchable Stack_overflow
+   rather than as the death of the process. See the comments on each. */
 
 #include <caml/mlvalues.h>
 #include <caml/memory.h>
@@ -113,4 +118,30 @@ CAMLprim value vsrocq_thread_create_with_stack(value stack_mb, value closure)
   pthread_attr_destroy(&attr);
   CAMLreturn(Val_true);
 #endif
+}
+
+/* The other half of making an overflow on this thread survivable, and macOS
+   only. OCaml's stack-overflow detector is installed for SIGSEGV alone
+   (runtime/signals_nat.c), which is the right signal everywhere except on a
+   macOS secondary thread: the main thread's stack limit is an unmapped region,
+   so overflowing it is KERN_INVALID_ADDRESS -> SIGSEGV, but a pthread's guard
+   is an mprotect'd mapping, so overflowing that is KERN_PROTECTION_FAILURE ->
+   SIGBUS, which nothing handles. Copying the handler onto SIGBUS routes both
+   through the detection that already exists.
+
+   Not done outside macOS, unlike the stack size above. Elsewhere SIGBUS is
+   never a stack overflow, so the mirroring could only mishandle a real bus
+   error -- and would, at some length: the handler's rejection path disarms
+   SIGSEGV, not the signal it was entered on, so a genuine SIGBUS would be
+   retried against a handler that is still installed, forever. That cost is
+   worth paying only where it buys something. */
+CAMLprim value vsrocq_report_thread_stack_overflow(value unit)
+{
+  CAMLparam1(unit);
+#if defined(__APPLE__) && !defined(_WIN32)
+  struct sigaction act;
+  if (sigaction(SIGSEGV, NULL, &act) == 0)
+    sigaction(SIGBUS, &act, NULL);
+#endif
+  CAMLreturn(Val_unit);
 }
