@@ -126,7 +126,19 @@ export function resolveVsrocqtop(): { command: string; args: string[] } {
             "../../../../language-server/_build/install/default/bin/vsrocqtop",
         );
     const args = fixedArguments ?? process.env.VSROCQARGS?.split(" ") ?? [];
-    return { command, args };
+    // Every server this suite starts runs with the `diags_version` audit on.
+    //
+    // The server skips publishing diagnostics when a counter in
+    // `dm/document.ml` says nothing the client could see has changed, and that
+    // counter is maintained by hand at every site touching a sentence's
+    // errors, messages or positions. With this flag the server recomputes the
+    // diagnostics on each skipped publication and dies if they moved after
+    // all. It is off by default because it costs precisely the work the
+    // skipping saves; it is on here so that every test in this suite — these
+    // and any written later — doubles as a check on the counter, which no
+    // single hand-written sequence could be. See `audit_skipped_publication`
+    // in `vsrocqtop/lspManager.ml`.
+    return { command, args: [...args, "-vsrocq-d", "diags-version"] };
 }
 
 /**
