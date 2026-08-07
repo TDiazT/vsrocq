@@ -59,6 +59,13 @@ val overview : state -> exec_overview
 val shift_overview :
   state -> before:document -> after:document -> start:int -> offset:int -> state
 
+val truncate_overview : state -> Position.t -> state
+(** [truncate_overview st position] drops everything the overview claims at or
+    after [position], cutting a range that straddles it. Called after
+    [shift_overview] when an edit arrives: the shift alone leaves the overview
+    claiming the whole document is still checked, which is what the client is
+    told before any re-checking has happened. *)
+
 val executed_ranges :
   document -> state -> exec_overview
 

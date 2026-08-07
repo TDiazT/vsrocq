@@ -41,6 +41,7 @@ Dm\.Types\.
 get_document_symbols\.
 Internal\.string_of_state\.string_of_state
 Dm\.CheckingManager\.shift_overview\.shift_loc
+Dm\.CheckingManager\.truncate_overview\.truncate
 Dm\.CheckingManager\.overview_until_range\.find_final_range
 Dm\.Log\.mk_log -> CErrors\.iprint
 Dm\.ExecutionManager\.build_tasks_for\.build_tasks

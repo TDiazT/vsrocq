@@ -385,6 +385,11 @@ let apply_text_edits state edits =
     let offset = String.length new_text - edit_length in
     let document = Document.shift_feedbacks_and_checking_errors ~start ~offset document in
     let checking_state = CheckingManager.shift_overview state.checking_state ~before:state.document ~after:document ~start:edit_stop ~offset:(String.length new_text - edit_length) in
+    (* The shift moves the overview but leaves it claiming everything past the
+       edit, which update_view then reports as a fully checked document before
+       any re-checking has started. Positions before the edit are unaffected by
+       it, so range.start is the same in both documents. *)
+    let checking_state = CheckingManager.truncate_overview checking_state range.Range.start in
     {state with checking_state; document; document_state = Parsing; pending_feedback = []}
   in
   let state = List.fold_left apply_edit_and_shift_diagnostics_locs_and_overview state edits in
