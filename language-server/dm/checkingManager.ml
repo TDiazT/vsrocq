@@ -342,6 +342,37 @@ let shift_overview st ~before ~after ~start ~offset =
   let overview = { processed; processing; prepared } in
   { st with overview }
 
+(* Everything in the overview from [position] onwards describes text the edit
+   just replaced: those sentences are about to be re-parsed and re-checked, so
+   the overview no longer knows anything about them. shift_overview above only
+   moves the ranges to account for the new text, which leaves processed still
+   spanning the whole document — and update_view sends that out right away, so
+   the first notification after a didChange announces the document as fully
+   checked before any of the work has been redone. A client keyed on it cannot
+   tell that from a genuine completion, since the contents are identical.
+
+   A range that straddles [position] is cut at it rather than dropped: the
+   sentences before the edit are still checked, and the common case of a fully
+   checked document is one single range, which dropping would blank the
+   overview out entirely and make the highlighting flash on every keystroke.
+
+   The overview is rebuilt exactly by reset_overview once the re-parse ends;
+   this only makes the window before that report the truth. *)
+let truncate_overview st position =
+  let truncate_range (range : Range.t) =
+    if Position.compare range.end_ position <= 0 then Some range
+    else if Position.compare range.start position >= 0 then None
+    else Some (Range.create ~start:range.start ~end_:position)
+  in
+  let truncate = List.filter_map truncate_range in
+  let { processed; processing; prepared } = st.overview in
+  let overview = {
+    processed = truncate processed;
+    processing = truncate processing;
+    prepared = truncate prepared;
+  } in
+  { st with overview }
+
 let executed_ranges document st =
   let mode = !settings.check_mode in
   match (st.observe_id, mode) with

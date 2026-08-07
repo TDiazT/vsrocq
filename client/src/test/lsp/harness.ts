@@ -463,29 +463,28 @@ export class LspHarness {
     }
 
     /**
-     * Resolves once `uri` has been re-checked following an edit.
+     * Resolves once `uri` has been re-checked following an edit. Waits in two
+     * stages: first for the server to report work in progress, and only then
+     * for the readiness predicate.
      *
-     * `waitUntilChecked` on its own returns immediately here and reports
-     * success while the server is still working — finding V11. The
+     * The first stage was originally the only thing making this trustworthy.
+     * `waitUntilChecked` used to return immediately after a `didChange` and
+     * report success while the server was still recomputing (finding V11): the
      * `prover/updateHighlights` that `textDocumentDidChange` emits
-     * synchronously carries the *pre-edit* overview, shifted for the edit
-     * (`CheckingManager.shift_overview`) but not truncated at it, with
-     * `preparedRange` and `processingRange` empty. Nothing in its contents
-     * distinguishes it from a genuine completion.
+     * synchronously carried the pre-edit overview, shifted for the edit but not
+     * truncated at it, and nothing in its contents distinguished it from a
+     * genuine completion. What did distinguish it was its position in the
+     * sequence — the server sends it before scheduling any parsing or checking
+     * — so waiting for progress first consumed it. That is now fixed in
+     * `CheckingManager.truncate_overview`, and the first notification reports
+     * the document as checked only up to the edit.
      *
-     * What does distinguish it is its position in the sequence: the server
-     * sends it before it has scheduled any parsing or checking, so every
-     * notification reporting real progress comes after it. So this waits in two
-     * stages — first for the server to report work in progress, which consumes
-     * the stale notification, and only then for the readiness predicate. The
-     * ordering is guaranteed by the server's own control flow
-     * (`apply_text_edits`, then `update_view`, then the returned events), not
-     * by timing.
-     *
-     * The first stage times out if the edit causes no work at all. That is
-     * deliberate: an edit that triggers no re-checking has nothing for a
-     * caller to wait for, and silently treating it as "re-checked" is how a
-     * test ends up asserting against the pre-edit state.
+     * Both stages stay. The first now earns its place by failing loudly when an
+     * edit causes no work at all, rather than letting a caller treat that as
+     * "re-checked" and assert against the pre-edit state; and it keeps the
+     * suite honest if the truncation ever regresses. The ordering it relies on
+     * is a property of the server's control flow (`apply_text_edits`, then
+     * `update_view`, then the returned events), not of timing.
      */
     async waitUntilRechecked(
         uri: string,
