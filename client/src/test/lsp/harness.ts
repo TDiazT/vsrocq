@@ -209,7 +209,7 @@ export async function compileFixture(
 }
 
 /** How the server process ended, recorded as soon as it does. */
-interface ServerExit {
+export interface ServerExit {
     code: number | null;
     signal: NodeJS.Signals | null;
     /** Time from spawn to exit, in milliseconds. */
@@ -232,6 +232,7 @@ export class LspHarness {
     private nextVersion = 1;
     private readonly startedAt = Date.now();
     private exit: ServerExit | undefined;
+    private stderr = "";
 
     /**
      * Exposed directly (rather than wrapped) so that feature-specific tests
@@ -256,7 +257,7 @@ export class LspHarness {
         private readonly child: cp.ChildProcessByStdio<
             Writable,
             Readable,
-            null
+            Readable
         >,
         connection: ProtocolConnection,
     ) {
@@ -287,6 +288,22 @@ export class LspHarness {
         return this.exit.signal !== null
             ? `vsrocqtop died with ${this.exit.signal} ${elapsed}`
             : `vsrocqtop exited with code ${this.exit.code} ${elapsed}`;
+    }
+
+    /**
+     * How the server process ended, or `undefined` while it is still running.
+     *
+     * For a test that has to tell one death from another rather than merely
+     * report it. Reading this is only meaningful once something else has
+     * observed the end — a wait that rejected, or `isRunning`.
+     */
+    serverExit(): Readonly<ServerExit> | undefined {
+        return this.exit;
+    }
+
+    /** Everything the server has written to stderr so far. */
+    serverStderr(): string {
+        return this.stderr;
     }
 
     /**
@@ -365,12 +382,22 @@ export class LspHarness {
         settings: Settings = defaultSettings(),
     ): Promise<LspHarness> {
         const { command, args } = resolveVsrocqtop();
+        // stderr is piped rather than inherited so that a test can read what
+        // the server said on its way out — a handler that dies deliberately
+        // says so there, and "which death was this" is otherwise only the
+        // signal number. Everything read is passed straight through, so the
+        // runner's output is what it was before.
         const child = cp.spawn(command, args, {
-            stdio: ["pipe", "pipe", "inherit"],
+            stdio: ["pipe", "pipe", "pipe"],
         });
 
         const connection = createProtocolConnection(child.stdout, child.stdin);
         const harness = new LspHarness(child, connection);
+
+        child.stderr.on("data", (chunk: Buffer) => {
+            harness.stderr += chunk.toString();
+            process.stderr.write(chunk);
+        });
 
         // Recorded rather than acted on: a server death is reported by
         // whichever wait or request is left with nothing to wait for, which is
