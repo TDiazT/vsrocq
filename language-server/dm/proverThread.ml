@@ -75,8 +75,16 @@ external create_with_stack : int -> (unit -> unit) -> bool
   = "vsrocq_thread_create_with_stack"
 
 (* Makes an overflow on this thread a sentence error instead of a signal that
-   kills the server. macOS only, and only half the story -- the other half is
-   in the trampoline; see proverThreadStubs.c for both. *)
+   kills the server -- on macOS, where the runtime is not installed on the
+   signal the platform delivers. Only half the story there; the other half is
+   in the trampoline.
+
+   On Linux the runtime is already installed on the right signal and this
+   changes nothing about which overflows survive. What it adds is a name for
+   the one kind that cannot: an overflow that reaches the guard page from
+   inside the runtime's own C is declined, and until this the process simply
+   vanished with a bare SIGSEGV and nothing on stderr to tell it from any
+   other crash. See proverThreadStubs.c for all of it. *)
 external report_thread_stack_overflow : unit -> unit
   = "vsrocq_report_thread_stack_overflow"
 
