@@ -80,9 +80,20 @@ Both halves matter:
 ```sh
 opam switch create vsrocq-dev ocaml-base-compiler.4.14.2
 eval $(opam env --switch=vsrocq-dev --set-switch)
-opam install rocq-core.9.2.0 rocq-runtime.9.2.0 rocq-stdlib.9.2.0
+opam update
+opam install rocq-core.9.2.0 rocq-runtime.9.2.0 rocq-stdlib
 opam install ./language-server/vsrocq-language-server.opam --deps-only --with-test
 ```
+
+`rocq-stdlib` is versioned independently of `rocq-core`/`rocq-runtime` — it only
+requires `rocq-core >= 9.0` — and the default opam repo has not published a
+`9.2.0` yet, only up to `9.1.0`. Pinning it to `9.2.0` (matching the other two
+packages, which is what this doc used to say) fails with `Package rocq-stdlib
+has no version 9.2.0`. Leave it unpinned; opam resolves it to the newest
+version satisfying the constraint, `9.1.0`. Also run `opam update` before
+installing if the switch is fresh — the version list opam ships with a new
+repo clone can lag, and `rocq-core.9.2.0` itself resolves as unavailable until
+the index is refreshed.
 
 A plain switch is enough. `docs/developers.md` tells you to build inside a Rocq
 repository checkout ("Composing the build with Rocq"); that is only needed when
@@ -97,8 +108,40 @@ and fails with dune errors about a missing `lsp` package — which look like a
 dependency problem and are not.
 
 Second trap, on either OS: Rocq 9.x ships `rocq` and no `coqc`. A stray `coqc`
-from another switch earlier in `PATH` makes the build compile against the wrong
-Rocq API, and the type errors it produces point nowhere near the cause.
+from another switch **anywhere** in `PATH` — not just ahead of `vsrocq-dev`'s
+own `bin/` — makes the build compile against the wrong Rocq API, and the type
+errors it produces point nowhere near the cause. This is not a corner case on a
+machine that already has other opam switches (likely, for anyone doing regular
+opam-based work): opam's shell init (sourced from `.zshrc`/`.bashrc`) puts the
+*global default switch*'s `bin/` on `PATH` in every fresh shell, before you've
+run anything. `eval $(opam env --switch=vsrocq-dev --set-switch)` only
+*prepends* `vsrocq-dev/bin`; it does not remove that stray entry. Since
+`vsrocq-dev/bin` has no `coqc`, `command -v coqc` (used by
+`language-server/Makefile`'s dune-file generator to pick the Rocq version)
+falls through to the other switch's `coqc` and silently detects the wrong
+version — concretely, this made `make dune-files` print `Building for Rocq
+9.3+alpha` instead of `9.2` and generate dune files for the wrong branch, with
+no error at all. Fix: strip every opam switch's `bin/` from `PATH`, then
+re-run `opam env` so only the target switch's comes back:
+
+```sh
+eval $(opam env --switch=vsrocq-dev --set-switch)
+export PATH="$(echo "$PATH" | tr ':' '\n' | grep -vE '/\.opam/[^/]+/bin$' | paste -sd: -)"
+eval $(opam env --switch=vsrocq-dev --set-switch)
+```
+
+Check it worked with `command -v coqc` — it should print nothing. If `make
+dune-files` was ever run with the trap live, delete the generated files before
+retrying: they're `chmod a-w`'d after generation, so a re-run without deleting
+them first silently no-ops (`make: Nothing to be done for 'dune-files'`) and
+leaves the wrong version baked in.
+
+```sh
+find . -name "dune.in" | sed -e 's/\.in$//' | while read f; do
+  [ -f "$f" ] && chmod u+w "$f" && rm -f "$f"
+done
+make dune-files
+```
 
 ## 3. Node
 
