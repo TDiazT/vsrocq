@@ -16,17 +16,26 @@ which is per-clone and therefore does not travel either.
 On a fresh clone:
 
 ```sh
-git clone --recurse-submodules git@github.com:TDiazT/RocqLSP.git
-cd RocqLSP/vsrocq
-git fetch origin fork-config
-git show origin/fork-config:docs/agents/exclude >> .git/info/exclude
+git clone -b setup git@github.com:TDiazT/RocqLSP.git
+cd RocqLSP
+git submodule update --init vsrocq     # rocq-lsp is not needed to work on this fork
+cd vsrocq
+git fetch origin && git checkout staging
+
+git show origin/fork-config:docs/agents/exclude >> "$(git rev-parse --git-dir)/info/exclude"
 git restore --source=origin/fork-config --worktree -- AGENTS.md CONTEXT.md docs/agents
 ```
 
-The `restore` writes the files into the working tree without staging them, and
-the `exclude` lines keep `git status` quiet about them. Do that in the order
-shown: exclude first, restore second, or the files show up as untracked and
-invite an accidental `git add .`.
+Use `$(git rev-parse --git-dir)`, not a literal `.git/`: this is a submodule, so
+`.git` here is a *file* pointing at `../.git/modules/vsrocq`, and redirecting
+into `.git/info/exclude` fails.
+
+`submodule update` leaves the submodule on a detached HEAD at the pinned commit;
+`checkout staging` puts you on the branch, at that same commit. The `restore`
+writes the fork-only files into the working tree without staging them, and the
+`exclude` lines keep `git status` quiet about them. Do it in the order shown:
+exclude first, restore second, or they show up as untracked and invite an
+accidental `git add .`.
 
 To edit them, work on a `fork-config` worktree and push there — not from the
 `staging` checkout, where they are untracked on purpose. Note that worktrees
