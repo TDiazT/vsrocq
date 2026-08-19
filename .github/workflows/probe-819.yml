@@ -1,0 +1,60 @@
+name: probe-819
+
+# Temporary diagnostic workflow: is the intermittent
+#   "utils/warnings.ml, line 491 ... Assertion failed"
+# failure when building coq-core.8.19.0 on macos-latest/arm64
+# caused by dune's build parallelism (-j)?
+#
+# Two arms, one per branch:
+#   probe-819-jobs2  -> OPAMJOBS: 2  (control, reproduces today's CI)
+#   probe-819-jobs1  -> OPAMJOBS: 1  (treatment)
+# Six replicas each; baseline failure rate is ~50%.
+
+on: [push, workflow_dispatch]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2, 3, 4, 5, 6]
+    runs-on: macos-latest
+    env:
+      OPAMYES: true
+      OPAMJOBS: 2
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+
+    - name: Use OCaml 4.14.2
+      uses: avsm/setup-ocaml@v3
+      with:
+        ocaml-compiler: 4.14.2
+
+    - name: Report environment
+      run: |
+        echo "replica    = ${{ matrix.replica }}"
+        echo "OPAMJOBS   = $OPAMJOBS"
+        echo "opam jobs  = $(opam var jobs)"
+        echo "arch       = $(uname -m)"
+        opam --version
+        opam exec -- ocamlc -version
+
+    - name: Pin coq-core 8.19.0
+      run: |
+        set -o pipefail
+        opam pin add coq-core 8.19.0 2>&1 | tee /tmp/pin.log
+
+    - name: Classify failure
+      if: failure()
+      run: |
+        echo "--- dune parallelism actually used ---"
+        grep -o 'dune build -p coq-core -j [0-9]*' /tmp/pin.log || echo "(not found)"
+        echo "--- assertion present? ---"
+        if grep -q 'warnings.ml", line 491' /tmp/pin.log; then
+          echo "RESULT: warnings.ml:491 assertion"
+          grep -o '\-intf [^ )]*' /tmp/pin.log | sort -u
+        else
+          echo "RESULT: different failure"
+          tail -40 /tmp/pin.log
+        fi
