@@ -8,9 +8,16 @@ name: probe-819
 # Two arms, one per branch:
 #   probe-819-jobs2  -> OPAMJOBS: 2  (control, reproduces today's CI)
 #   probe-819-jobs1  -> OPAMJOBS: 1  (treatment)
-# Six replicas each; baseline failure rate is ~50%.
+#
+# Round 1 (1 trial/job, 6 jobs/arm) gave control 1/6, treatment 0/6 --
+# directionally right but statistically empty. The ~4 min setup-ocaml step
+# dominates job time, so amortise it: 5 trials per job x 6 jobs = 30 trials
+# per arm, for the same number of runners.
 
 on: [push, workflow_dispatch]
+
+env:
+  TRIALS: 5
 
 jobs:
   probe:
@@ -40,21 +47,26 @@ jobs:
         opam --version
         opam exec -- ocamlc -version
 
-    - name: Pin coq-core 8.19.0
+    # Each trial is a full from-scratch build of coq-core.8.19.0.
+    # Trials never abort the job: we count outcomes and report at the end.
+    - name: Run trials
       run: |
-        set -o pipefail
-        opam pin add coq-core 8.19.0 2>&1 | tee /tmp/pin.log
-
-    - name: Classify failure
-      if: failure()
-      run: |
-        echo "--- dune parallelism actually used ---"
-        grep -o 'dune build -p coq-core -j [0-9]*' /tmp/pin.log || echo "(not found)"
-        echo "--- assertion present? ---"
-        if grep -q 'warnings.ml", line 491' /tmp/pin.log; then
-          echo "RESULT: warnings.ml:491 assertion"
-          grep -o '\-intf [^ )]*' /tmp/pin.log | sort -u
-        else
-          echo "RESULT: different failure"
-          tail -40 /tmp/pin.log
-        fi
+        fails=0; asserts=0
+        for i in $(seq 1 "$TRIALS"); do
+          opam pin remove coq-core -y >/dev/null 2>&1 || true
+          if opam pin add coq-core 8.19.0 >"/tmp/trial$i.log" 2>&1; then
+            echo "trial $i: PASS"
+          else
+            fails=$((fails + 1))
+            if grep -q 'warnings.ml", line 491' "/tmp/trial$i.log"; then
+              asserts=$((asserts + 1))
+              echo "trial $i: FAIL warnings.ml:491"
+              grep -o 'dune build -p coq-core -j [0-9]*' "/tmp/trial$i.log" | head -1
+              grep -o '\-intf [^ )]*' "/tmp/trial$i.log" | sort -u | head -3
+            else
+              echo "trial $i: FAIL other"
+              tail -25 "/tmp/trial$i.log"
+            fi
+          fi
+        done
+        echo "SUMMARY replica=${{ matrix.replica }} jobs=$OPAMJOBS trials=$TRIALS fails=$fails asserts=$asserts"
