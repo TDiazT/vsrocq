@@ -5,14 +5,16 @@ name: probe-819
 # failure when building coq-core.8.19.0 on macos-latest/arm64
 # caused by dune's build parallelism (-j)?
 #
-# Two arms, one per branch:
-#   probe-819-jobs2  -> OPAMJOBS: 2  (control, reproduces today's CI)
-#   probe-819-jobs1  -> OPAMJOBS: 1  (treatment)
+# Three arms, one per branch:
+#   probe-819-jobs1  -> OPAMJOBS: 1
+#   probe-819-jobs2  -> OPAMJOBS: 2  (what CI does today)
+#   probe-819-jobs4  -> OPAMJOBS: 4  (oversubscribes the 3-vCPU runner)
 #
-# Round 1 (1 trial/job, 6 jobs/arm) gave control 1/6, treatment 0/6 --
-# directionally right but statistically empty. The ~4 min setup-ocaml step
-# dominates job time, so amortise it: 5 trials per job x 6 jobs = 30 trials
-# per arm, for the same number of runners.
+# Round 4. Rounds 2-3 were invalid: `opam pin remove` does not uninstall the
+# package, so re-pinning the same version returned in ~7s without rebuilding
+# and only the first trial per job was an independent build. Fixed by
+# uninstalling explicitly. Each trial now asserts it took >60s, so a silently
+# cached trial can never again be counted as a real one.
 
 on: [push, workflow_dispatch]
 
@@ -26,6 +28,7 @@ jobs:
       matrix:
         replica: [1, 2, 3, 4, 5, 6]
     runs-on: macos-latest
+    timeout-minutes: 90
     env:
       OPAMYES: true
       OPAMJOBS: 4
@@ -48,25 +51,40 @@ jobs:
         opam exec -- ocamlc -version
 
     # Each trial is a full from-scratch build of coq-core.8.19.0.
-    # Trials never abort the job: we count outcomes and report at the end.
+    # Trials never abort the job: outcomes are counted and reported at the end.
     - name: Run trials
       run: |
-        fails=0; asserts=0
+        fails=0; asserts=0; cached=0
         for i in $(seq 1 "$TRIALS"); do
+          # Removing the pin alone does NOT uninstall the package, so re-pinning
+          # the same version is a no-op. Uninstall to force a real rebuild.
           opam pin remove coq-core -y >/dev/null 2>&1 || true
+          opam uninstall coq-core -y  >/dev/null 2>&1 || true
+
+          t0=$(date +%s)
           if opam pin add coq-core 8.19.0 >"/tmp/trial$i.log" 2>&1; then
-            echo "trial $i: PASS"
+            outcome=PASS
           else
+            outcome=FAIL
             fails=$((fails + 1))
             if grep -q 'warnings.ml", line 491' "/tmp/trial$i.log"; then
-              asserts=$((asserts + 1))
-              echo "trial $i: FAIL warnings.ml:491"
+              asserts=$((asserts + 1)); outcome="FAIL warnings.ml:491"
               grep -o 'dune build -p coq-core -j [0-9]*' "/tmp/trial$i.log" | head -1
               grep -o '\-intf [^ )]*' "/tmp/trial$i.log" | sort -u | head -3
             else
-              echo "trial $i: FAIL other"
+              outcome="FAIL other"
               tail -25 "/tmp/trial$i.log"
             fi
           fi
+          secs=$(( $(date +%s) - t0 ))
+
+          # A genuine coq-core build takes minutes. Anything fast was served
+          # from an existing install and must not be counted as a trial.
+          if [ "$secs" -lt 60 ]; then
+            cached=$((cached + 1))
+            echo "trial $i: ${outcome} (${secs}s) *** NOT AN INDEPENDENT BUILD ***"
+          else
+            echo "trial $i: ${outcome} (${secs}s)"
+          fi
         done
-        echo "SUMMARY replica=${{ matrix.replica }} jobs=$OPAMJOBS trials=$TRIALS fails=$fails asserts=$asserts"
+        echo "SUMMARY replica=${{ matrix.replica }} jobs=$OPAMJOBS trials=$TRIALS fails=$fails asserts=$asserts cached=$cached"
