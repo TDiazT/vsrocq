@@ -7,8 +7,8 @@ else.
 
 ## 0. Getting this file onto the machine at all
 
-`AGENTS.md`, `CONTEXT.md`, `docs/agents/` and `docs/adr/` are fork-only tooling
-and are deliberately **not** tracked on `staging` — that branch carries only
+`AGENTS.md`, `CONTEXT.md` and `docs/agents/` are fork-only tooling and are
+deliberately **not** tracked on `staging` — that branch carries only
 work destined for an upstream PR. They live on the orphan branch `fork-config`
 in this same fork, and are excluded from `staging` through `.git/info/exclude`,
 which is per-clone and therefore does not travel either.
@@ -20,7 +20,7 @@ git clone --recurse-submodules git@github.com:TDiazT/RocqLSP.git
 cd RocqLSP/vsrocq
 git fetch origin fork-config
 git show origin/fork-config:docs/agents/exclude >> .git/info/exclude
-git restore --source=origin/fork-config --worktree -- AGENTS.md CONTEXT.md docs/agents docs/adr
+git restore --source=origin/fork-config --worktree -- AGENTS.md CONTEXT.md docs/agents
 ```
 
 The `restore` writes the files into the working tree without staging them, and
@@ -29,7 +29,13 @@ shown: exclude first, restore second, or the files show up as untracked and
 invite an accidental `git add .`.
 
 To edit them, work on a `fork-config` worktree and push there — not from the
-`staging` checkout, where they are untracked on purpose.
+`staging` checkout, where they are untracked on purpose. Note that worktrees
+share one `.git/info/exclude`, so adding a *new* file on `fork-config` needs
+`git add -f`.
+
+`docs/adr/` is **not** in this set. It is tracked on `staging` and goes upstream:
+the suite's README and harness cite ADR-0001 by path, so it has to exist in any
+branch those files reach.
 
 ## 1. System packages
 

@@ -2,7 +2,6 @@
 AGENTS.md
 CONTEXT.md
 docs/agents/
-docs/adr/
 # claude-code-runtime
 **/.claude/scheduled_tasks.lock
 **/.claude/scheduled_tasks.json
