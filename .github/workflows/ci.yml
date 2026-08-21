@@ -63,7 +63,9 @@ jobs:
       if: ${{matrix.coq != 9}}
     - run: nix develop .#vsrocq-${{ matrix.coq }} -c bash -c "cd language-server && make dune-files && dune build --profile ${{ matrix.profile }}"
       if: ${{matrix.coq == 9}}
-    - run: nix develop .#vsrocq-${{ matrix.coq }} -c bash -c "cd client && npm install && npm run build --workspaces"
+    # `npm ci` only installs; the workspace build comes from the implicit
+    # `pretest` of the `npm test` step below, so it happens once.
+    - run: nix develop .#vsrocq-${{ matrix.coq }} -c bash -c "cd client && npm ci"
     - name: Test xvfb
       uses: Wandalen/wretry.action@v3
       with:
@@ -127,7 +129,10 @@ jobs:
       with:
         node-version: 22
 
-    - run: cd client && npm run package
+    # `npm run package` would install and build; the build then happened a
+    # second time in the implicit `pretest` of the step below. `npm ci` drops
+    # that duplicate and makes the lockfile authoritative.
+    - run: cd client && npm ci
       if: runner.os == 'Linux'
     - run: |
         eval $(opam env) && cd client && xvfb-run npm test
@@ -209,7 +214,8 @@ jobs:
         eval $(opam env)
         echo vsrocqlib="$( echo -n "-coqlib "; (rocq -where || coqc -where) 2>/dev/null )" >> $GITHUB_ENV
 
-    - run: cd client && npm install && npm run build --workspaces
+    # Same as above: the build belongs to `pretest`, not to this step.
+    - run: cd client && npm ci
     - run: cd client && xvfb-run npm test
       env:
         VSROCQARGS: "${{ env.vsrocqlib }}"
