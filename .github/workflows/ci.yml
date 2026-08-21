@@ -33,6 +33,7 @@ jobs:
 
   build-extension:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -110,8 +111,9 @@ jobs:
     - name: Test LSP golden (Rocq 9.2)
       if: ${{ matrix.coq == 9 }}
       run: nix develop .#vsrocq-${{ matrix.coq }} -c bash -c "cd client && if ls out/test/lsp/golden/*.test.js >/dev/null 2>&1; then npm run test:lsp:golden; else echo 'no golden tests yet'; fi"
-    - if: ${{ failure() }}
-      run: cat /tmp/vsrocq_init_log.*
+    - name: Language server init log
+      if: ${{ failure() }}
+      run: cat /tmp/vsrocq_init_log.* 2>/dev/null || echo "no init log was written"
 
   install-opam:
     needs: matrix-plan
@@ -187,8 +189,9 @@ jobs:
       env:
         VSROCQPATH: ${{ env.vsrocqtop }}
         VSROCQARGS: "-bt"
-    - if: runner.os == 'Linux' && failure()
-      run: cat /tmp/vsrocq_init_log.*
+    - name: Language server init log
+      if: runner.os == 'Linux' && failure()
+      run: cat /tmp/vsrocq_init_log.* 2>/dev/null || echo "no init log was written"
 
   install-windows:
     if: false
@@ -220,6 +223,7 @@ jobs:
 
   dev-setup-opam:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest]
         ocaml-compiler: [4.14.x]
@@ -274,8 +278,9 @@ jobs:
       env:
         VSROCQARGS: "${{ env.vsrocqlib }}"
 
-    - if: ${{ failure() }}
-      run: cat /tmp/vsrocq_init_log.*
+    - name: Language server init log
+      if: ${{ failure() }}
+      run: cat /tmp/vsrocq_init_log.* 2>/dev/null || echo "no init log was written"
 
 
   create-release:
