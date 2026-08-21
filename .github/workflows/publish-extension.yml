@@ -1,3 +1,10 @@
+# Every job gets a GITHUB_TOKEN whether a step uses it or not, and this
+# repository's default grants write on every scope. This workflow needs none of
+# it: both marketplaces authenticate with their own PATs (OVSX_PAT, VSCE_PAT),
+# so the checkout is all GITHUB_TOKEN is left for.
+permissions:
+  contents: read
+
 on: 
     workflow_dispatch:
       inputs:
