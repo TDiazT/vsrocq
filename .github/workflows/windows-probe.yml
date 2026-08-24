@@ -1,0 +1,242 @@
+name: windows probe
+
+# A throwaway loop for getting the Windows build green. It exists so that an
+# iteration costs one Windows job instead of the whole ci.yml matrix: ci.yml
+# runs only on main, on tags and on pull requests, so pushing to this branch
+# schedules nothing but this file. Delete it before anything here is proposed
+# upstream.
+
+on:
+  push:
+    branches: [ 'ci/windows-**', 'win/**' ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  install-opam-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [cygwin, msys2]
+        rocq: [ "9.2.0" ]
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      OPAMYES: true
+      OPAMSOLVERTIMEOUT: 600
+    steps:
+      # The runner image sets core.autocrlf=true globally. The build reads
+      # dune.in files and shell fragments through Cygwin tools, which do not
+      # tolerate CRLF, so check the tree out verbatim.
+      - name: Set git to use LF
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "4.14"
+          opam-pin: false
+          windows-environment: ${{ matrix.environment }}
+
+      # setup-ocaml deliberately does not cache project dependencies, and
+      # building Rocq from source is about a third of this job. restore/save
+      # rather than actions/cache, because actions/cache skips its save step
+      # when the job fails, which is every iteration that is worth having a
+      # cache for. The switch is local: OPAM_SWITCH_PREFIX is <workspace>\_opam
+      # and OPAMROOT is C:\.opam.
+      - name: Restore the switch
+        id: switch-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            _opam
+            C:\.opam\download-cache
+          key: win-${{ matrix.environment }}-4.14-x64-v2-rocq-${{ matrix.rocq }}-${{ hashFiles('language-server/vsrocq-language-server.opam') }}
+
+      - name: Install Rocq
+        if: steps.switch-cache.outputs.cache-hit != 'true'
+        run: |
+          if ("${{ matrix.rocq }}".StartsWith("8")) {
+            opam pin add coq-core ${{ matrix.rocq }}
+            opam pin add coq-stdlib ${{ matrix.rocq }}
+          } else {
+            opam pin add rocq-core ${{ matrix.rocq }}
+          }
+
+      # arch-x86_64 is passed explicitly. It is a virtual package that defines
+      # opam's `arch` variable, so without it the solver is free to satisfy a
+      # constraint by swapping in arch-x86_32 and rebuilding the compiler as
+      # 32-bit mingw, which it did. Asking for it by name turns that silent flip
+      # into a conflict report naming whichever dependency wants it.
+      - name: Show what the solver wants to do
+        if: steps.switch-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: opam install ./language-server/vsrocq-language-server.opam --deps-only --with-test arch-x86_64 --show-actions
+
+      - name: Install the language server dependencies
+        if: steps.switch-cache.outputs.cache-hit != 'true'
+        run: opam install ./language-server/vsrocq-language-server.opam --deps-only --with-test arch-x86_64
+
+      - name: Save the switch
+        if: always() && steps.switch-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            _opam
+            C:\.opam\download-cache
+          key: ${{ steps.switch-cache.outputs.cache-primary-key }}
+
+      # The switch cache covers _opam, but zarith's libgmp lives in opam's
+      # internal Cygwin under C:\.opam\.cygwin\root, which it does not. A cache
+      # hit skips the two install steps above and therefore skips the depexts
+      # with them, and the link then dies on "Cannot find file -lgmp". Asking for
+      # depexts explicitly is a no-op when they are already there.
+      - name: Make sure the system dependencies are present
+        run: opam install ./language-server/vsrocq-language-server.opam --depext-only --with-test
+
+      - name: Report what got installed
+        run: |
+          opam list --installed
+          opam exec -- rocq -print-version
+          opam exec -- rocq -where
+
+      # Split out from the pin below so that a failure in the shell plumbing of
+      # the Makefile is distinguishable from a failure to compile OCaml.
+      - name: Generate the dune files
+        working-directory: language-server
+        run: opam exec -- make dune-files
+
+      # The literal 4000000000 in vsrocqtop/lspManager.ml only fits when this
+      # says 63. A 32-bit switch reports 31 and the compile fails there.
+      - name: Report the word size the compiler was built for
+        run: opam exec -- ocamlopt -config
+
+      - name: Build the language server
+        working-directory: language-server
+        run: opam exec -- dune build -p vsrocq-language-server
+
+      # The thing a Windows user actually runs.
+      - name: Install vsrocq-language-server
+        run: opam pin add vsrocq-language-server ./language-server/
+
+      - name: Run it
+        run: opam exec -- vsrocqtop -v
+
+  # Why the solver moves the switch to 32-bit. Dry runs only: --show-actions
+  # mutates nothing, and none of this needs Rocq compiled, so the job costs a
+  # setup-ocaml and a handful of seconds rather than twenty minutes.
+  #
+  # setup-ocaml sets OPAMEXTERNALSOLVER=builtin-0install. Its README says opam's
+  # default solver "is designed to maintain a set of packages over time,
+  # minimising disruption" and that this one trades that away for speed, which is
+  # the -changed term that should have made a 14-package rebuild lose.
+  # arch-x86_32 also carries `flags: [compiler avoid-version]`, and the switch
+  # criteria are -changed,-count[avoid-version,solution], so a criteria-optimising
+  # solver ought to reject this plan twice over.
+  #
+  # If mccs does not flip, users on opam's default solver were never affected and
+  # this is ours to fix in CI. If mccs flips too, it is user-facing.
+  # Why the solver moves the switch to 32-bit.
+  #
+  # This needs rocq-core 9.2.0 in the switch: on an empty switch opam resolves
+  # vsrocq against coq-core 8.20.1 instead, a different dependency cone, and
+  # nothing flips. So the Rocq install is the setup cost, cached on its own key
+  # so that repeats are cheap. Everything after it is --show-actions, which
+  # mutates nothing.
+  #
+  # setup-ocaml sets OPAMEXTERNALSOLVER=builtin-0install (confirmed by
+  # `opam config report`). Its README says opam's default solver "is designed to
+  # maintain a set of packages over time, minimising disruption" and that this one
+  # trades that away for speed, which is the -changed term that should have made a
+  # 14-package rebuild lose. arch-x86_32 also carries
+  # `flags: [compiler avoid-version]`, and the criteria are
+  # -changed,-count[avoid-version,solution], so a criteria-optimising solver ought
+  # to reject the plan twice over. builtin-mccs+glpk is the one bundled here;
+  # plain builtin-mccs is not installed.
+  solver-probe:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      OPAMYES: true
+    steps:
+      - name: Set git to use LF
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "4.14"
+          opam-pin: false
+          windows-environment: cygwin
+
+      # Deliberately a different key from the job above, whose switch has
+      # arch-x86_64 installed as an explicit root and so can never flip.
+      - name: Restore the switch
+        id: switch-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            _opam
+            C:\.opam\download-cache
+          key: solver-probe-cygwin-4.14-rocq-9.2.0-v1
+
+      - name: Install Rocq
+        if: steps.switch-cache.outputs.cache-hit != 'true'
+        run: opam pin add rocq-core 9.2.0
+
+      - name: Save the switch
+        if: always() && steps.switch-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            _opam
+            C:\.opam\download-cache
+          key: ${{ steps.switch-cache.outputs.cache-primary-key }}
+
+      - name: Confirm the starting state
+        run: |
+          opam config report
+          opam list --installed | Select-String -Pattern "arch-|rocq-|ocaml-env"
+
+      - name: Baseline, 0install solver
+        continue-on-error: true
+        run: opam install ./language-server/vsrocq-language-server.opam --show-actions
+
+      - name: Same thing, mccs solver
+        continue-on-error: true
+        run: opam install ./language-server/vsrocq-language-server.opam --show-actions --solver=builtin-mccs+glpk
+
+      # Does stating the constraint as a conflict, rather than as `available:`,
+      # stop the solver choosing the flip? `available:` is evaluated against the
+      # switch's current variables, so it cannot bind the assignment the solver
+      # picks. `conflicts:` can. This edits the working tree, so it runs last.
+      - name: Restate the constraint as a conflict
+        run: |
+          $f = "language-server/vsrocq-language-server.opam"
+          $repl = "conflicts: [`n    `"arch-x86_32`"`n    `"arch-arm32`""
+          (Get-Content $f -Raw) -replace 'conflicts: \[', $repl | Set-Content $f
+          Get-Content $f | Select-String -Pattern "conflicts" -Context 0,4
+
+      - name: With the conflict, 0install solver
+        continue-on-error: true
+        run: opam install ./language-server/vsrocq-language-server.opam --show-actions
+
+      - name: With the conflict, mccs solver
+        continue-on-error: true
+        run: opam install ./language-server/vsrocq-language-server.opam --show-actions --solver=builtin-mccs+glpk
