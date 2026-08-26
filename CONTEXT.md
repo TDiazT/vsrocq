@@ -74,6 +74,28 @@ _Avoid_: auto mode
 The user drives `observe_id` explicitly via step forward/backward or interpret-to-point; nothing executes unless requested.
 _Avoid_: step mode
 
+### Client and toolchain
+
+**Extension**:
+The VS Code / VSCodium plugin, published to the Marketplace and Open VSX and versioned in `client/package.json`. It auto-updates in the editor without asking. Distinct from the **language server package**, which does not.
+_Avoid_: plugin, "VsRocq" unqualified
+
+**vsrocqtop**:
+The language server executable the **extension** launches over stdio. `VsRocqToolchainManager` locates it from the `vsrocq.path` setting, falling back to a `PATH` search, then probes it with `-where` and `-v`.
+_Avoid_: the server (ambiguous with the running process), backend
+
+**Language server package**:
+The opam package `vsrocq-language-server`, which builds and installs **vsrocqtop**. It changes only when a human runs an opam command. `vscoq-language-server` is a compatibility meta package that depends on it at the same version. The package name and the executable name are different and are not interchangeable.
+_Avoid_: the server package (say which one), vsrocqtop (that is the binary)
+
+**Switch**:
+The opam switch supplying both Rocq and the **language server package**. The switch an install would land in is whatever the environment VS Code inherited resolves to, which need not be the switch whose **vsrocqtop** is on `PATH`, nor the one holding the Rocq the project is checked against.
+_Avoid_: environment, opam env
+
+**Toolchain**:
+**vsrocqtop** together with the Rocq it was built against, as discovered by `VsRocqToolchainManager` during extension activation. Discovery currently runs exactly once, at activation.
+_Avoid_: installation, setup
+
 ## Relationships
 
 - A **Document** contains an ordered list of **Sentences**; each **Sentence** stores the **Scheduler** state before and after it.
@@ -100,3 +122,4 @@ _Avoid_: step mode
 - "Parsing" is often used loosely to cover both the syntactic parse step and **Synterp**, but they're distinct: synterp runs *during* the parse step and produces its own sequential state (`Vernacstate.Synterp.t`), separate from the parsed AST. When precision matters (e.g. discussing incrementality), say "parse" for the AST and "synterp" for the scope-resolution side effect.
 - "Scheduler" collides with the general concept of a task scheduler — in this codebase it refers specifically to the sentence-dependency component in `dm/scheduler.ml`, not to SEL (which is the actual event loop / dispatcher).
 - "Execution" is used both narrowly (the **Interp** phase, i.e. `Vernacinterp.interp`) and broadly (the whole check pipeline including parsing). Prefer **Interp** when talking about the elaboration step specifically.
+- "VsRocq version" is used in the wild for both the **extension** version and the **vsrocqtop** version. They are released on independent tracks and routinely differ, so the phrase must never appear unqualified in user-facing text or in a message asking someone to upgrade. Say "extension version" or "language server version".
