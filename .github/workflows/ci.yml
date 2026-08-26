@@ -1,3 +1,9 @@
+# Every job gets a GITHUB_TOKEN whether a step uses it or not, and this
+# repository's default grants write on every scope. Only `create-release` needs
+# more than the checkout, and it declares that for itself.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [ main, coq-master ]
@@ -276,6 +282,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [build-extension, nix-dev-build, install-opam, dev-setup-opam]
+    # softprops/action-gh-release creates the release through GITHUB_TOKEN, and
+    # generate_release_notes calls the release-notes endpoint; both need
+    # contents: write. A job-level block sets every scope it omits to none
+    # rather than adding to the top-level one, so this list stands alone.
+    # Only the Release step needs it, and that step runs on tags only, so a
+    # mistake here passes every pull request and surfaces on a release.
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
