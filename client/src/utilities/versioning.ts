@@ -1,6 +1,7 @@
 import { compareVersions } from "compare-versions";
-import { ExtensionContext, window } from "vscode";
+import { ExtensionContext } from "vscode";
 import Client from "../client";
+import { versionRequirements } from "./serverInstall";
 
 export const getRocqdocUrl = (rocqVersion: string) => {
     return `https://rocq-prover.org/doc/V${rocqVersion}/refman/index.html`;
@@ -17,14 +18,17 @@ export const checkVersion = (client: Client, context: ExtensionContext) => {
                 "[Versioning] Intialized server " + name + " [" + version + "]",
             );
             if (!checkCompat(extensionVersion, version)) {
-                window.showErrorMessage(
-                    "This version of VsRocq requires version " +
-                        versionRequirements[extensionVersion] +
-                        " of " +
-                        name +
-                        ". Found version: " +
+                // The message is no longer raised here. extension.ts runs the
+                // install flow with this same server version, which can name
+                // the command to fix it; two popups for one problem is worse
+                // than one that is actionable.
+                Client.writeToVsrocqChannel(
+                    "[Versioning] Server " +
                         version +
-                        ". Please upgrade the language server.",
+                        " is older than the " +
+                        versionRequirements[extensionVersion] +
+                        " required by extension " +
+                        extensionVersion,
                 );
             }
         } else {
@@ -39,53 +43,28 @@ export const checkVersion = (client: Client, context: ExtensionContext) => {
     }
 };
 
-type VersionReq = {
-    [index: string]: string;
-};
-
-/*  Version requirements for the client. Syntax is client version : minimum server version */
-const versionRequirements: VersionReq = {
-    "2.0.0": "2.0.0",
-    "2.0.1": "2.0.0",
-    "2.0.2": "2.0.0",
-    "2.0.3": "2.0.3",
-    "2.1.0": "2.0.3",
-    "2.1.1": "2.1.1",
-    "2.1.2": "2.1.2",
-    "2.1.3": "2.1.3",
-    "2.1.5": "2.1.5",
-    "2.1.6": "2.1.5",
-    "2.1.7": "2.1.7",
-    "2.2.0": "2.1.7",
-    "2.2.1": "2.2.1",
-    "2.2.2": "2.2.2",
-    "2.2.3": "2.2.2",
-    "2.2.4": "2.2.4",
-    "2.2.5": "2.2.5",
-    "2.2.6": "2.2.6",
-    "2.3.0": "2.3.0",
-    "2.3.1": "2.3.0",
-    "2.3.2": "2.3.0",
-    "2.3.3": "2.3.3",
-    "2.3.4": "2.3.3",
-    "2.4.0": "2.4.0",
-    "2.4.1": "2.4.0",
-    "2.4.2": "2.4.0",
-    "2.4.3": "2.3.3",
-};
-
 //We will add version ranges as we start releasing
 const checkCompat = (
     clientVersion: string,
     serverVersion: string | undefined,
 ) => {
-    if (serverVersion !== undefined) {
-        return (
-            compareVersions(
-                serverVersion,
-                versionRequirements[clientVersion],
-            ) >= 0
+    const required: string | undefined = versionRequirements[clientVersion];
+    if (required === undefined) {
+        // No row for this extension version. The map is maintained by hand in
+        // the release commit, so a build can exist without one. There is no
+        // bound to compare against, and passing undefined to compareVersions
+        // throws `Invalid argument expected string`, which would take down the
+        // rest of the client.start() callback with it. Report nothing rather
+        // than reporting something untrue.
+        Client.writeToVsrocqChannel(
+            "[Versioning] No known server requirement for client version " +
+                clientVersion +
+                ": skipping the compatibility check",
         );
+        return true;
+    }
+    if (serverVersion !== undefined) {
+        return compareVersions(serverVersion, required) >= 0;
     }
     return false;
 };

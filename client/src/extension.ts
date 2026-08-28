@@ -55,6 +55,7 @@ import {
     SearchRocqResult,
 } from "./protocol/types";
 import { QUICKFIX_COMMAND, RocqWarningQuickFix } from "./QuickFixProvider";
+import { offerLanguageServerInstall } from "./utilities/installFlow";
 import VsRocqToolchainManager, {
     ToolchainError,
     ToolChainErrorCode,
@@ -77,75 +78,103 @@ export function activate(context: ExtensionContext) {
     };
 
     const rocqTM = new VsRocqToolchainManager();
-    rocqTM.intialize().then(
-        () => {
-            const serverOptions = rocqTM.getServerConfiguration();
-            intializeExtension(serverOptions);
-        },
-        (err: ToolchainError) => {
-            switch (err.status) {
-                case ToolChainErrorCode.notFound:
-                    window
-                        .showErrorMessage(
-                            "No language server found",
-                            { modal: true, detail: err.message },
-                            {
-                                title: "Install the VsRocq language server (Recommended for Rocq >= 8.18)",
-                                id: 0,
-                            },
-                            {
-                                title: "Install VsRocq Legacy (Required for Rocq <= 8.17)",
-                                id: 1,
-                            },
-                        )
-                        .then((act) => {
-                            if (act?.id === 0) {
-                                commands.executeCommand(
-                                    "vscode.open",
-                                    Uri.parse(
-                                        "https://github.com/rocq-prover/vscoq?tab=readme-ov-file#installing-the-language-server",
-                                    ),
-                                );
-                            }
-                            if (act?.id === 1) {
-                                commands.executeCommand(
-                                    "extension.open",
-                                    "coq-community.vscoq1",
-                                );
-                            }
-                        });
-                    break;
 
-                case ToolChainErrorCode.launchError:
-                    window
-                        .showErrorMessage(
-                            "Could not launch language server" + err.message,
-                            { modal: true, detail: err.message },
-                            { title: "Get Rocq", id: 0 },
-                            {
-                                title: "Install VsRocq Legacy (Required for Rocq <= 8.17)",
-                                id: 1,
-                            },
-                        )
-                        .then((act) => {
-                            if (act?.id === 0) {
-                                commands.executeCommand(
-                                    "vscode.open",
-                                    Uri.parse(
-                                        "https://rocq-prover.org/install",
-                                    ),
-                                );
-                            }
-                            if (act?.id === 1) {
-                                commands.executeCommand(
-                                    "extension.open",
-                                    "rocq-community.vsrocq1",
-                                );
-                            }
-                        });
-            }
-        },
+    // The version the running server reported, or null while none is running.
+    let serverVersion: string | null = null;
+
+    // Toolchain discovery used to happen exactly once, so a user who fixed
+    // their installation had no way back in short of reloading the window.
+    // Naming it lets the install flow offer a Retry.
+    const startToolchain = () => {
+        rocqTM.intialize().then(
+            () => {
+                // A retry once the client is already up has nothing to do.
+                if (client) {
+                    return;
+                }
+                const serverOptions = rocqTM.getServerConfiguration();
+                intializeExtension(serverOptions);
+            },
+            (err: ToolchainError) => {
+                switch (err.status) {
+                    case ToolChainErrorCode.notFound:
+                        window
+                            .showErrorMessage(
+                                "No language server found",
+                                { modal: true, detail: err.message },
+                                {
+                                    title: "Install the VsRocq language server (Recommended for Rocq >= 8.18)",
+                                    id: 0,
+                                },
+                                {
+                                    title: "Install VsRocq Legacy (Required for Rocq <= 8.17)",
+                                    id: 1,
+                                },
+                            )
+                            .then((act) => {
+                                if (act?.id === 0) {
+                                    void offerLanguageServerInstall(
+                                        context,
+                                        null,
+                                        startToolchain,
+                                    );
+                                }
+                                if (act?.id === 1) {
+                                    commands.executeCommand(
+                                        "extension.open",
+                                        "coq-community.vscoq1",
+                                    );
+                                }
+                            });
+                        break;
+
+                    case ToolChainErrorCode.launchError:
+                        window
+                            .showErrorMessage(
+                                "Could not launch language server" +
+                                    err.message,
+                                { modal: true, detail: err.message },
+                                { title: "Get Rocq", id: 0 },
+                                {
+                                    title: "Install VsRocq Legacy (Required for Rocq <= 8.17)",
+                                    id: 1,
+                                },
+                            )
+                            .then((act) => {
+                                if (act?.id === 0) {
+                                    commands.executeCommand(
+                                        "vscode.open",
+                                        Uri.parse(
+                                            "https://rocq-prover.org/install",
+                                        ),
+                                    );
+                                }
+                                if (act?.id === 1) {
+                                    commands.executeCommand(
+                                        "extension.open",
+                                        "rocq-community.vsrocq1",
+                                    );
+                                }
+                            });
+                }
+            },
+        );
+    };
+
+    context.subscriptions.push(
+        commands.registerCommand("extension.rocq.installLanguageServer", () =>
+            offerLanguageServerInstall(
+                context,
+                serverVersion,
+                startToolchain,
+                // Invoked deliberately from the palette, so say so even when
+                // there is nothing wrong.
+                true,
+            ),
+        ),
     );
+
+    startToolchain();
 
     // Detect if vsrocq1 is installed and active
     const vsrocq1 = extensions.getExtension("rocq-community.vsrocq1");
@@ -474,6 +503,15 @@ export function activate(context: ExtensionContext) {
         client.start().then(() => {
             checkVersion(client, context);
             const serverInfo = client.initializeResult!.serverInfo;
+            serverVersion = serverInfo?.version ?? null;
+            // Q3(b): the drift case. The extension auto-updates in the editor
+            // while the opam package does not, so a server that was fine
+            // yesterday can be behind today. Says nothing when it is not.
+            void offerLanguageServerInstall(
+                context,
+                serverVersion,
+                startToolchain,
+            );
             const configString = new MarkdownString(
                 `**Rocq Installation**
 
