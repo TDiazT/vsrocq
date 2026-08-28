@@ -33,6 +33,7 @@ jobs:
         cache: npm
         cache-dependency-path: client/package-lock.json
     - run: npm run package
+    - run: npm run test:unit
 
   nix-dev-build:
     strategy:

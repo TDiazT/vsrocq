@@ -5,6 +5,10 @@ import { ServerOptions } from "vscode-languageclient/node";
 import which from "which";
 import Client from "../client";
 import { getConfigurationOption } from "../configuration";
+import {
+    missingConfiguredServerMessage,
+    resolveServerBinary,
+} from "./serverBinary";
 
 export enum ToolChainErrorCode {
     notFound = 1,
@@ -29,7 +33,14 @@ export default class VsRocqToolchainManager implements Disposable {
         return new Promise(
             (resolve, reject: (reason: ToolchainError) => void) => {
                 this.vsrocqtopPath().then((vsrocqtopPath) => {
-                    if (vsrocqtopPath) {
+                    if (vsrocqtopPath === null) {
+                        reject({
+                            status: ToolChainErrorCode.notFound,
+                            message: missingConfiguredServerMessage(
+                                getConfigurationOption("path") as string,
+                            ),
+                        });
+                    } else if (vsrocqtopPath) {
                         Client.writeToVsrocqChannel(
                             "[Toolchain] Found path: " + vsrocqtopPath,
                         );
@@ -86,12 +97,24 @@ export default class VsRocqToolchainManager implements Disposable {
         return this._versionFullOutput;
     }
 
-    private async vsrocqtopPath(): Promise<string> {
+    /**
+     * The binary to run: the configured one, else whatever PATH holds. An
+     * empty string means nothing was found; null means `vsrocq.path` is set
+     * but points at nothing, which needs different advice from "not found".
+     */
+    private async vsrocqtopPath(): Promise<string | null> {
         const vsrocqtopPath = getConfigurationOption("path");
         if (vsrocqtopPath) {
             Client.writeToVsrocqChannel(
                 "[Toolchain] Path set in user settings",
             );
+            if ((await resolveServerBinary(vsrocqtopPath)) === null) {
+                Client.writeToVsrocqChannel(
+                    "[Toolchain] Configured path does not resolve: " +
+                        vsrocqtopPath,
+                );
+                return null;
+            }
             return vsrocqtopPath;
         } else {
             return await this.searchForVsrocqtopInPath();
