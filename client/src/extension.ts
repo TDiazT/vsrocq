@@ -174,6 +174,35 @@ export function activate(context: ExtensionContext) {
         ),
     );
 
+    // These work before and without a language server, so a user whose
+    // setup is broken can still reach the guide and the setup report.
+    registerVsrocqCommand("walkthrough", () => {
+        commands.executeCommand(
+            "workbench.action.openWalkthrough",
+            "rocq-prover.vsrocq#rocq.welcome",
+            false,
+        );
+    });
+    registerVsrocqCommand("showLog", () => {
+        Client.showLog();
+    });
+    registerVsrocqCommand("showSetup", () => {
+        const configString = getConfigString(
+            client?.initializeResult?.serverInfo,
+        );
+        window
+            .showInformationMessage(
+                configString,
+                { modal: true },
+                { title: "Copy to clipboard", id: 0 },
+            )
+            .then((act) => {
+                if (act?.id === 0) {
+                    env.clipboard.writeText(configString);
+                }
+            });
+    });
+
     startToolchain();
 
     // Detect if vsrocq1 is installed and active
@@ -206,9 +235,9 @@ export function activate(context: ExtensionContext) {
     }
 
     const getConfigString = (serverInfo: any) => {
-        const clean_strings = (str: string) => {
+        const clean_strings = (str: string | undefined) => {
             // Properly escape backticks and pipes in the string, replace newlines with spaces
-            return str
+            return (str ?? "not available")
                 .replace(/`/g, "\\`")
                 .replace(/\|/g, "\\|")
                 .replace(/\n/g, " ");
@@ -234,6 +263,15 @@ export function activate(context: ExtensionContext) {
                 "extension.rocq." + command,
                 callback,
             ),
+        );
+    }
+
+    function registerVsrocqCommand<C extends string>(
+        command: `extension.rocq.${C}` extends CommandKey ? C : never,
+        callback: (...args: any[]) => unknown,
+    ) {
+        context.subscriptions.push(
+            commands.registerCommand("extension.rocq." + command, callback),
         );
     }
 
@@ -373,31 +411,6 @@ export function activate(context: ExtensionContext) {
                 viewColumn: ViewColumn.Two,
                 preserveFocus: true,
             });
-        });
-        registerVsrocqTextCommand("showLog", () => {
-            Client.showLog();
-        });
-        registerVsrocqTextCommand("showSetup", () => {
-            const serverInfo = client.initializeResult!.serverInfo;
-            const configString = getConfigString(serverInfo);
-            window
-                .showInformationMessage(
-                    configString,
-                    { modal: true },
-                    { title: "Copy to clipboard", id: 0 },
-                )
-                .then((act) => {
-                    if (act?.id === 0) {
-                        env.clipboard.writeText(configString);
-                    }
-                });
-        });
-        registerVsrocqTextCommand("walkthrough", () => {
-            commands.executeCommand(
-                "workbench.action.openWalkthrough",
-                "rocq-prover.vsrocq#rocq.welcome",
-                false,
-            );
         });
         registerVsrocqTextCommand("showManual", () => {
             const url = getRocqdocUrl(rocqTM.getRocqVersion());
