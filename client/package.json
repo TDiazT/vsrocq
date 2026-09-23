@@ -334,6 +334,11 @@
         "title": "Troubleshooting: Install the language server"
       },
       {
+        "command": "extension.rocq.checkSetup",
+        "category": "Rocq",
+        "title": "Troubleshooting: Check setup"
+      },
+      {
         "command": "extension.rocq.showLog",
         "category": "Rocq",
         "title": "Troubleshooting: Show Log Output"

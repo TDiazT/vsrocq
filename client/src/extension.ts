@@ -56,6 +56,7 @@ import {
 } from "./protocol/types";
 import { QUICKFIX_COMMAND, RocqWarningQuickFix } from "./QuickFixProvider";
 import { offerLanguageServerInstall } from "./utilities/installFlow";
+import { SetupCheck } from "./utilities/setupCheck";
 import VsRocqToolchainManager, {
     ToolchainError,
     ToolChainErrorCode,
@@ -77,7 +78,19 @@ export function activate(context: ExtensionContext) {
         return client.sendRequest(req, params);
     };
 
-    const rocqTM = new VsRocqToolchainManager();
+    const setupCheck = new SetupCheck();
+    const rocqTM = new VsRocqToolchainManager(setupCheck);
+    // Set when vsrocq.path or vsrocq.args change while a server is running,
+    // since that server keeps the old ones until the window reloads.
+    let serverConfigChanged = false;
+    // Set when the user starts the server from the setup check, so the start
+    // is announced: the status bar item is the only other sign, and VS Code
+    // hides it when the window is too narrow.
+    let announceStart = false;
+    // True from the moment startToolchain begins until the toolchain check
+    // fails or the client has finished starting, so nothing offers a second
+    // start meanwhile.
+    let serverStarting = false;
 
     // The version the running server reported, or null while none is running.
     let serverVersion: string | null = null;
@@ -86,7 +99,15 @@ export function activate(context: ExtensionContext) {
     // their installation had no way back in short of reloading the window.
     // Naming it lets the install flow offer a Retry.
     const startToolchain = () => {
-        rocqTM.intialize().then(
+        if (client || serverStarting) {
+            return;
+        }
+        serverStarting = true;
+        const found = rocqTM.intialize();
+        found.catch(() => {
+            serverStarting = false;
+        });
+        found.then(
             () => {
                 // A retry once the client is already up has nothing to do.
                 if (client) {
@@ -186,10 +207,18 @@ export function activate(context: ExtensionContext) {
     registerVsrocqCommand("showLog", () => {
         Client.showLog();
     });
-    registerVsrocqCommand("showSetup", () => {
-        const configString = getConfigString(
+    registerVsrocqCommand("showSetup", async () => {
+        let configString = getConfigString(
             client?.initializeResult?.serverInfo,
         );
+        if (client?.initializeResult === undefined) {
+            // Awaited: right after activation no check has finished yet.
+            const { message } = setupCheck.describe(await setupCheck.run());
+            const state = serverStarting
+                ? "The language server is starting."
+                : "The language server is not running.";
+            configString += `\n\n${state} ${message}`;
+        }
         window
             .showInformationMessage(
                 configString,
@@ -202,6 +231,74 @@ export function activate(context: ExtensionContext) {
                 }
             });
     });
+
+    registerVsrocqCommand("checkSetup", async () => {
+        const status = await setupCheck.run();
+        const { ok, message } = setupCheck.describe(status);
+        const running = client?.initializeResult !== undefined;
+        // A client that exists but never initialized failed to start, and
+        // startToolchain will not replace it.
+        const failedToStart =
+            client !== undefined && !running && !serverStarting;
+        const lines = [message];
+        const actions: string[] = [];
+        if (ok && serverStarting) {
+            lines.push("The language server is starting.");
+        } else if (ok && failedToStart) {
+            lines.push(
+                "The language server did not start; reload the window to try again.",
+            );
+            actions.push("Reload window");
+        } else if (ok && !running) {
+            actions.push("Start language server");
+        } else if (ok && serverConfigChanged) {
+            lines.push(
+                "The running language server still uses the old settings; reload the window to restart it.",
+            );
+            actions.push("Reload window");
+        } else if (ok) {
+            lines.push(
+                setupCheck.compat?.message ??
+                    "No server version requirement is known for this extension version, so the server version was not checked.",
+            );
+        }
+        if (!ok) {
+            actions.push("Show log");
+        }
+        const text = lines.join(" ");
+        const shown =
+            ok && setupCheck.compat?.ok !== false
+                ? window.showInformationMessage(text, ...actions)
+                : window.showWarningMessage(text, ...actions);
+        // Not awaited: a notification stays pending until dismissed.
+        shown.then((act) => {
+            if (act === "Start language server") {
+                announceStart = true;
+                startToolchain();
+            }
+            if (act === "Reload window") {
+                commands.executeCommand("workbench.action.reloadWindow");
+            }
+            if (act === "Show log") {
+                Client.showLog();
+            }
+        });
+        return status;
+    });
+
+    context.subscriptions.push(
+        workspace.onDidChangeConfiguration((event) => {
+            if (
+                event.affectsConfiguration("vsrocq.path") ||
+                event.affectsConfiguration("vsrocq.args")
+            ) {
+                if (client?.initializeResult !== undefined) {
+                    serverConfigChanged = true;
+                }
+                commands.executeCommand("extension.rocq.checkSetup");
+            }
+        }),
+    );
 
     startToolchain();
 
@@ -513,8 +610,17 @@ export function activate(context: ExtensionContext) {
             },
         );
 
-        client.start().then(() => {
-            checkVersion(client, context);
+        const started = client.start();
+        started
+            .finally(() => {
+                serverStarting = false;
+            })
+            .catch(() => undefined);
+        started.then(() => {
+            const compat = checkVersion(client, context);
+            if (compat) {
+                setupCheck.recordCompat(compat);
+            }
             const serverInfo = client.initializeResult!.serverInfo;
             serverVersion = serverInfo?.version ?? null;
             // Q3(b): the drift case. The extension auto-updates in the editor
@@ -541,6 +647,12 @@ Path: \`${rocqTM.getVsRocqTopPath()}\`
             statusBar.text = `${serverInfo?.name} ${serverInfo?.version}, rocq ${rocqTM.getRocqVersion()}`;
             statusBar.tooltip = configString;
             statusBar.show();
+            if (announceStart) {
+                announceStart = false;
+                window.showInformationMessage(
+                    `The language server started: ${statusBar.text}.`,
+                );
+            }
 
             initializeDecorations(context);
 

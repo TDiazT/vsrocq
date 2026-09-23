@@ -1,70 +1,46 @@
-import { compareVersions } from "compare-versions";
 import { ExtensionContext } from "vscode";
 import Client from "../client";
-import { versionRequirements } from "./serverInstall";
+import { compatibility, Compatibility } from "./setupProbe";
 
 export const getRocqdocUrl = (rocqVersion: string) => {
     return `https://rocq-prover.org/doc/V${rocqVersion}/refman/index.html`;
 };
 
-export const checkVersion = (client: Client, context: ExtensionContext) => {
+export const checkVersion = (
+    client: Client,
+    context: ExtensionContext,
+): Compatibility | undefined => {
     const extensionVersion = context.extension.packageJSON.version;
     const initializeResult = client.initializeResult;
-    if (initializeResult !== undefined) {
-        const serverInfo = client.initializeResult?.serverInfo;
-        if (serverInfo !== undefined) {
-            const { name, version } = serverInfo;
-            Client.writeToVsrocqChannel(
-                "[Versioning] Intialized server " + name + " [" + version + "]",
-            );
-            if (!checkCompat(extensionVersion, version)) {
-                // The message is no longer raised here. extension.ts runs the
-                // install flow with this same server version, which can name
-                // the command to fix it; two popups for one problem is worse
-                // than one that is actionable.
-                Client.writeToVsrocqChannel(
-                    "[Versioning] Server " +
-                        version +
-                        " is older than the " +
-                        versionRequirements[extensionVersion] +
-                        " required by extension " +
-                        extensionVersion,
-                );
-            }
-        } else {
-            Client.writeToVsrocqChannel(
-                "Could not run compatibility tests: failed to get serverInfo",
-            );
-        }
-    } else {
+    if (initializeResult === undefined) {
         Client.writeToVsrocqChannel(
             "Could not run compatibility tests: failed to receive initializeResult",
         );
+        return undefined;
     }
-};
-
-//We will add version ranges as we start releasing
-const checkCompat = (
-    clientVersion: string,
-    serverVersion: string | undefined,
-) => {
-    const required: string | undefined = versionRequirements[clientVersion];
-    if (required === undefined) {
-        // No row for this extension version. The map is maintained by hand in
-        // the release commit, so a build can exist without one. There is no
-        // bound to compare against, and passing undefined to compareVersions
-        // throws `Invalid argument expected string`, which would take down the
-        // rest of the client.start() callback with it. Report nothing rather
-        // than reporting something untrue.
+    const serverInfo = initializeResult.serverInfo;
+    if (serverInfo === undefined || serverInfo.version === undefined) {
+        Client.writeToVsrocqChannel(
+            "Could not run compatibility tests: failed to get serverInfo",
+        );
+        return undefined;
+    }
+    const { name, version } = serverInfo;
+    Client.writeToVsrocqChannel(
+        "[Versioning] Intialized server " + name + " [" + version + "]",
+    );
+    const result = compatibility(extensionVersion, name, version);
+    if (result === undefined) {
         Client.writeToVsrocqChannel(
             "[Versioning] No known server requirement for client version " +
-                clientVersion +
+                extensionVersion +
                 ": skipping the compatibility check",
         );
-        return true;
+    } else if (!result.ok) {
+        // The message is not raised here. extension.ts runs the install flow
+        // with this same server version, which can name the command to fix
+        // it; two popups for one problem is worse than one that is actionable.
+        Client.writeToVsrocqChannel("[Versioning] " + result.message);
     }
-    if (serverVersion !== undefined) {
-        return compareVersions(serverVersion, required) >= 0;
-    }
-    return false;
+    return result;
 };

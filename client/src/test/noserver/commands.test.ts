@@ -14,6 +14,7 @@ suite("Without a language server", function () {
         "extension.rocq.walkthrough",
         "extension.rocq.showSetup",
         "extension.rocq.showLog",
+        "extension.rocq.checkSetup",
     ]) {
         test(`${command} is registered`, async () => {
             const registered = await vscode.commands.getCommands(true);
@@ -21,4 +22,14 @@ suite("Without a language server", function () {
             await vscode.commands.executeCommand(command);
         });
     }
+
+    test("checkSetup reports the missing vsrocq.path", async () => {
+        const status = await vscode.commands.executeCommand(
+            "extension.rocq.checkSetup",
+        );
+        expect(status).toMatchObject({
+            found: false,
+            reason: "settingUnresolved",
+        });
+    });
 });
