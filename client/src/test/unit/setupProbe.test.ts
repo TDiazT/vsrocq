@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
     compatibility,
     describeStatus,
+    failingStep,
     ProbeInput,
     probeSetup,
 } from "../../utilities/setupProbe";
@@ -266,5 +267,53 @@ describe("compatibility", () => {
     it("makes no claim for an extension version without a row", () => {
         // ADR-0002: no bound may be invented for an unlisted version.
         expect(compatibility("9.9.9", "vsrocqtop", "2.5.0")).toBeUndefined();
+    });
+});
+
+describe("failingStep", () => {
+    it("sends a vsrocq.path that resolves to nothing to the find step", () => {
+        expect(failingStep({ found: false, reason: "settingUnresolved" })).toBe(
+            "findServer",
+        );
+    });
+
+    it("sends a missing server to the install step", () => {
+        expect(failingStep({ found: false, reason: "notOnPath" })).toBe(
+            "install",
+        );
+        expect(
+            failingStep({
+                found: false,
+                reason: "onlyVscoqtopOnPath",
+                path: "/bin/vscoqtop",
+            }),
+        ).toBe("install");
+    });
+
+    it("sends a server that does not start to the start step", () => {
+        expect(
+            failingStep({
+                found: true,
+                path: "/bin/vsrocqtop",
+                source: "PATH",
+                launch: { status: "timedOut", transcript: "" },
+            }),
+        ).toBe("serverStarts");
+    });
+
+    it("has no step for a server that starts", () => {
+        expect(
+            failingStep({
+                found: true,
+                path: "/bin/vsrocqtop",
+                source: "PATH",
+                launch: {
+                    status: "ok",
+                    rocqPath: "",
+                    versionOutput: "",
+                    rocqVersion: "9.1",
+                },
+            }),
+        ).toBeUndefined();
     });
 });

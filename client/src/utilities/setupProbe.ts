@@ -258,3 +258,24 @@ export function compatibility(
               message: `VsRocq ${extensionVersion} needs ${serverName} ${required} or newer; found ${serverVersion}.`,
           };
 }
+
+/** The walkthrough steps, in order; each is `rocq.welcome.<name>` in package.json. */
+export const SETUP_GUIDE_STEPS = [
+    "install",
+    "findServer",
+    "serverStarts",
+    "versions",
+    "firstProof",
+    "help",
+    "books",
+] as const;
+
+export type SetupGuideStep = (typeof SETUP_GUIDE_STEPS)[number];
+
+/** The walkthrough step that explains a failed check. */
+export function failingStep(status: SetupStatus): SetupGuideStep | undefined {
+    if (!status.found) {
+        return status.reason === "settingUnresolved" ? "findServer" : "install";
+    }
+    return status.launch.status === "ok" ? undefined : "serverStarts";
+}

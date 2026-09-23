@@ -491,6 +491,16 @@
       "vsrocq.menu": [
         {
           "when": "resourceLangId == rocq",
+          "command": "extension.rocq.walkthrough",
+          "group": "0_setup@1"
+        },
+        {
+          "when": "resourceLangId == rocq",
+          "command": "extension.rocq.checkSetup",
+          "group": "0_setup@2"
+        },
+        {
+          "when": "resourceLangId == rocq",
           "command": "extension.rocq.documentState",
           "group": "1_troubleshooting@1"
         },
@@ -511,10 +521,6 @@
         }
       ],
       "vsrocq.menu.doc": [
-        {
-          "when": "resourceLangId == rocq",
-          "command": "extension.rocq.walkthrough"
-        },
         {
           "when": "resourceLangId == rocq",
           "command": "extension.rocq.showManual"
@@ -966,40 +972,60 @@
       {
         "id": "rocq.welcome",
         "title": "Rocq Setup",
-        "description": "Getting started with Rocq",
+        "description": "Check that VS Code can find and run the Rocq language server, then step through a first proof.",
         "steps": [
           {
-            "id": "rocq.welcome.openHelpPage",
-            "title": "Re-open the setup page",
-            "description": "This page is accessible at any moment by opening an empty file, clicking on the Rocq menu and selecting ``Documentation > Docs: Show Setup Guide`` from the drop down menu.",
-            "media": {
-              "image": "./media/open_walkthrough.png",
-              "altText": "Click on the Rocq symbol and go to ```Docs: Show Setup Guide``` to re-open this walkthrough."
-            }
+            "id": "rocq.welcome.install",
+            "title": "Install Rocq and the VsRocq language server",
+            "description": "VsRocq needs the Rocq language server, vsrocqtop, installed next to Rocq. VsRocq works with Rocq 8.18 and later.\n[Install the language server](command:extension.rocq.installLanguageServer)\n[Check again](command:extension.rocq.checkSetup)",
+            "media": { "markdown": "./media/install.md" },
+            "completionEvents": ["onContext:vsrocq.setup.serverFound"]
+          },
+          {
+            "id": "rocq.welcome.findServer",
+            "title": "Let VS Code find vsrocqtop",
+            "description": "VS Code uses vsrocq.path if you set it, and otherwise looks for vsrocqtop on its PATH.\n[Look for it in opam](command:extension.rocq.installLanguageServer)\n[Check again](command:extension.rocq.checkSetup)\n[Open the vsrocq.path setting](command:workbench.action.openSettings?%5B%22vsrocq.path%22%5D)",
+            "media": { "markdown": "./media/find-server.md" },
+            "completionEvents": ["onContext:vsrocq.setup.serverFound"]
+          },
+          {
+            "id": "rocq.welcome.serverStarts",
+            "title": "Check that the language server starts",
+            "description": "vsrocqtop has to start and find its Rocq installation.\n[Check again](command:extension.rocq.checkSetup)\n[Show log](command:extension.rocq.showLog)",
+            "media": { "markdown": "./media/server-starts.md" },
+            "completionEvents": ["onContext:vsrocq.setup.serverLaunches"]
+          },
+          {
+            "id": "rocq.welcome.versions",
+            "title": "Check that the extension and server versions match",
+            "description": "Each version of this extension needs a minimum version of vsrocqtop.\n[Upgrade the language server](command:extension.rocq.installLanguageServer)\n[Check again](command:extension.rocq.checkSetup)\n[Reload window](command:workbench.action.reloadWindow)",
+            "media": { "markdown": "./media/versions.md" },
+            "completionEvents": ["onContext:vsrocq.setup.serverCompatible"]
+          },
+          {
+            "id": "rocq.welcome.firstProof",
+            "title": "Step through a proof",
+            "description": "Open a .v file and step forward with Alt+Down (Ctrl+Alt+Down on macOS).\n[Open a file...](command:workbench.action.files.openFile)",
+            "media": { "markdown": "./media/first-proof.md" },
+            "completionEvents": [
+              "onCommand:extension.rocq.stepForward",
+              "onCommand:extension.rocq.interpretToPoint",
+              "onCommand:extension.rocq.interpretToEnd"
+            ]
+          },
+          {
+            "id": "rocq.welcome.help",
+            "title": "Get help",
+            "description": "Ask on Zulip or open an issue, and include your setup report.\n[Copy the setup report](command:extension.rocq.showSetup)\n[Show log](command:extension.rocq.showLog)",
+            "media": { "markdown": "./media/help.md" },
+            "completionEvents": ["onCommand:extension.rocq.showSetup"]
           },
           {
             "id": "rocq.welcome.books",
-            "title": "Ressources to get started in the Rocq world",
-            "description": "You can find helpful books, documentations, and tutorials on this page",
-            "media": {
-              "markdown": "./media/books.md"
-            }
-          },
-          {
-            "id": "rocq.welcome.install",
-            "title": "Install dependencies",
-            "description": "How to install Rocq, setup vsrocq and its dependencies",
-            "media": {
-              "markdown": "./media/install.md"
-            }
-          },
-          {
-            "id": "rocq.welcome.troubleshooting",
-            "title": "Getting help",
-            "description": "If you have any questions or are having problem with any of the previous steps, please head over to the [Rocq zulip chat](https://rocq.zulipchat.com/) so we can help you.",
-            "media": {
-              "markdown": "./media/troubleshooting.md"
-            }
+            "title": "Learn Rocq",
+            "description": "Books and tutorials to get started.",
+            "media": { "markdown": "./media/books.md" },
+            "completionEvents": ["onStepSelected"]
           }
         ]
       }

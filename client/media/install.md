@@ -1,48 +1,27 @@
-# For beginners
+# Install Rocq and the VsRocq language server
 
-It is recommended to use the [coq-platform](https://github.com/coq/platform?tab=readme-ov-file#installation).
+The extension does not check proofs itself. It starts `vsrocqtop`, the VsRocq language server, which comes in the opam package `vsrocq-language-server`. It has to be built against the same Rocq you use.
 
-# For developpers
+## With opam
 
-## Opam
+"Install the language server" on the left works out which opam switch this window uses and gives you the install command for it, to run in a terminal. To do it by hand:
 
-[opam](https://opam.ocaml.org/) is the main OCaml package manager. It is the easiest way to install Coq and Coq packages.
-
-### Installing opam
-The quickest way to install opam is to run this script.
 ```
-bash -c "sh <(curl -fsSL https://raw.githubusercontent.com/ocaml/opam/master/shell/install.sh)"
-```
-Or for Windows users:
-```
-Invoke-Expression "& { $(Invoke-RestMethod https://raw.githubusercontent.com/ocaml/opam/master/shell/install.ps1) }"
-```
-Detailed install instructions can be found [here](https://opam.ocaml.org/doc/Install.html).
-
-### opam switch
-Central to using opam is the concept of "switch". A switch is an independent installation prefix with its own set of compiler and **pinned** packages.
-With this, a user can seamlesly switch from an environment with different Coq versions and packages installed.
-To create a new opam switch simply type:
-```
-opam switch create name
-```
-Where ```name``` will be used to reference the switch from here on out.
-
-## Coq
-
-### Installing Coq
-After creating a switch, it is simply a matter of typing the following command:
-```
-opam install coq
-```
-If you want a specific version of Coq, for example ```8.18.0```, then type:
-```
-opam pin add coq 8.18.0
+opam install rocq-prover vsrocq-language-server
 ```
 
-### Installing vscoq-language-server
+This installs into your shell's current opam switch. Step 2 explains how VS Code finds it.
 
-To use this extension, it is absolutely necessary to install the vscoq langauge server by typing:
+## With the Rocq Platform
+
+The [Rocq Platform](https://rocq-prover.org/install) installs Rocq, common libraries and the language server together.
+
+Some Platform releases ship the server under its old name, `vscoqtop`. If "Check again" reports only `vscoqtop`, point `vsrocq.path` at it to try it. If it does not start, it is the VsCoq server: install the language server with opam, or use VsCoq Legacy.
+
+## Rocq 8.17 and older
+
+This extension needs Rocq 8.18 or later. For older versions, use VsCoq Legacy. The marketplace may redirect searches for "VsCoq" here; to install it anyway, press Ctrl+P (Cmd+P on macOS) and run:
+
 ```
-opam install vscoq-language-server
+ext install coq-community.vscoq1
 ```

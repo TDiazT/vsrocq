@@ -4,6 +4,7 @@ import { ServerOptions } from "vscode-languageclient/node";
 import Client from "../client";
 import { getConfigurationOption } from "../configuration";
 import { SetupCheck } from "./setupCheck";
+import { failingStep, SetupGuideStep } from "./setupProbe";
 
 export enum ToolChainErrorCode {
     notFound = 1,
@@ -13,6 +14,7 @@ export enum ToolChainErrorCode {
 export interface ToolchainError {
     status: ToolChainErrorCode;
     message: string;
+    step: SetupGuideStep | undefined;
 }
 
 export default class VsRocqToolchainManager implements Disposable {
@@ -34,6 +36,7 @@ export default class VsRocqToolchainManager implements Disposable {
             const error: ToolchainError = {
                 status: ToolChainErrorCode.notFound,
                 message,
+                step: failingStep(status),
             };
             throw error;
         }
@@ -43,6 +46,7 @@ export default class VsRocqToolchainManager implements Disposable {
             const error: ToolchainError = {
                 status: ToolChainErrorCode.launchError,
                 message,
+                step: failingStep(status),
             };
             throw error;
         }

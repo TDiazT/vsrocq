@@ -6,6 +6,7 @@ import {
     describeStatus,
     ProbeInput,
     probeSetup,
+    SetupGuideStep,
     SetupStatus,
 } from "./setupProbe";
 
@@ -92,4 +93,21 @@ export class SetupCheck {
         this._compat = compat;
         setContext("vsrocq.setup.serverCompatible", compat.ok);
     }
+}
+
+const WALKTHROUGH = "rocq-prover.vsrocq#rocq.welcome";
+
+// VS Code joins `category` and `step` with "#" to find the step, so `step` is
+// the id from package.json, not prefixed with the walkthrough.
+export function openSetupGuide(step?: SetupGuideStep) {
+    commands.executeCommand(
+        "workbench.action.openWalkthrough",
+        step
+            ? {
+                  category: WALKTHROUGH,
+                  step: `rocq.welcome.${step}`,
+              }
+            : WALKTHROUGH,
+        false,
+    );
 }
