@@ -245,8 +245,10 @@ First, run `which vsrocqtop` in a terminal:
   - set the "Vsrocq: Path" setting (`vsrocq.path`) to the path printed by
     `which vsrocqtop`.
 
-After changing `vsrocq.path` or your opam switch, run **Developer: Reload Window**
-from the command palette (F1). VsRocq only looks for `vsrocqtop` when it starts.
+After changing `vsrocq.path`, run **Developer: Reload Window** from the command
+palette (F1). VsRocq only looks for `vsrocqtop` when it starts.
+If you change your opam switch instead, fully quit VS Code and start it again, so
+that it picks up the new `PATH`.
 
 ### Getting help
 
