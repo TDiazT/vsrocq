@@ -337,6 +337,56 @@ let%test_unit "edit.edit_non_root_observe_id" =
   [%test_eq: int option] (Option.map ~f:Stateid.to_int (DocumentManager.Internal.observe_id st))
     (Some (Stateid.to_int s1.id))
 
+let processed st =
+  Stdlib.List.map
+    (fun Lsp.Types.Range.{ start; end_ } -> (start.line, start.character, end_.line, end_.character))
+    (DocumentManager.executed_ranges st).processed
+
+(* Applies the edit without running the re-parse it schedules, so the state is
+   the one update_view reports to the client right after a didChange. *)
+let edit_text_before_reparse st ~start ~stop ~text =
+  let raw = DocumentManager.Internal.raw_document st in
+  let start = RawDocument.position_of_loc raw start in
+  let end_ = RawDocument.position_of_loc raw stop in
+  fst @@ DocumentManager.apply_text_edits st [(Lsp.Types.Range.{ start; end_ }, text)]
+
+let%test_unit "edit.overview_ends_at_edit" =
+                                              (*          1         2         3         4*)
+                                              (*01234567890123456789012345678901234567890123*)
+  let st, init_events = em_init_test_doc ~text:"Definition x := true. Definition y := false." in
+  let events = DocumentManager.interpret_to_end () in
+  let todo = Sel.Todo.(add init_events events) in
+  let st = handle_dm_events todo st in
+  let st = edit_text_before_reparse st ~start:38 ~stop:38 ~text:"not " in
+  [%test_eq: (int * int * int * int) list] (processed st) [ (0, 0, 0, 38) ]
+
+let%test_unit "edit.overview_empty_after_edit_at_start" =
+  let st, init_events = em_init_test_doc ~text:"Definition x := true. Definition y := false." in
+  let events = DocumentManager.interpret_to_end () in
+  let todo = Sel.Todo.(add init_events events) in
+  let st = handle_dm_events todo st in
+  let st = edit_text_before_reparse st ~start:0 ~stop:0 ~text:"Definition z := 0. " in
+  [%test_eq: (int * int * int * int) list] (processed st) []
+
+let%test_unit "edit.overview_kept_when_edit_is_after_it" =
+  let st, init_events = em_init_test_doc ~text:"Definition x := true. Definition y := false." in
+  let events = DocumentManager.interpret_to_next () in
+  let todo = Sel.Todo.(add init_events events) in
+  let st = handle_dm_events todo st in
+  let before = processed st in
+  let st = edit_text_before_reparse st ~start:38 ~stop:38 ~text:"not " in
+  [%test_eq: (int * int * int * int) list] (processed st) before
+
+let%test_unit "edit.overview_ends_where_deletion_starts" =
+                                              (*          1         2         3         4*)
+                                              (*01234567890123456789012345678901234567890123*)
+  let st, init_events = em_init_test_doc ~text:"Definition x := true. Definition y := false." in
+  let events = DocumentManager.interpret_to_end () in
+  let todo = Sel.Todo.(add init_events events) in
+  let st = handle_dm_events todo st in
+  let st = edit_text_before_reparse st ~start:16 ~stop:33 ~text:"" in
+  [%test_eq: (int * int * int * int) list] (processed st) [ (0, 0, 0, 16) ]
+
 let%test_unit "documentProofs.theorem_without_proof" =
   let st, init_events = em_init_test_doc ~text:"Theorem foo : True. Ltac a := idtac. Abort." in
   let st, (s1, (s2, (s3, ()))) = dm_parse st (P(P(P O))) in

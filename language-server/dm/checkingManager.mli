@@ -45,8 +45,10 @@ val get_observe_id : state -> sentence_id option
 val reset_overview : state -> document -> sentence_id option -> state
 val overview : state -> exec_overview
 
-val shift_overview :
-  state -> before:document -> after:document -> start:int -> offset:int -> state
+val truncate_overview : state -> Position.t -> state
+(** [truncate_overview st edit_start_pos] removes everything the overview
+    reports at or after [edit_start_pos], and cuts a range that crosses it,
+    because the text from that point on has changed and is not checked yet. *)
 
 val executed_ranges :
   document -> state -> exec_overview

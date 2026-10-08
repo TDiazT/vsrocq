@@ -313,24 +313,20 @@ let overview_until_range st range =
 let rec build_prepared_overview document tasks state =
   match tasks with [] -> state | task :: l -> build_prepared_overview document l (update_prepared task document state)
 
-let shift_overview st ~before ~after ~start ~offset =
-  let before = Document.raw_document before in
-  let after = Document.raw_document after in
-  let shift_loc loc_start loc_end =
-    if loc_start >= start then (loc_start + offset, loc_end + offset)
-    else if loc_end > start then (loc_start, loc_end + offset)
-    else (loc_start, loc_end)
+let truncate_overview st edit_start_pos =
+  let truncate_range (overview_range : Range.t) =
+    if Position.compare overview_range.end_ edit_start_pos <= 0 then Some overview_range
+    else if Position.compare overview_range.start edit_start_pos >= 0 then None
+    else Some (Range.create ~start:overview_range.start ~end_:edit_start_pos)
+    (* We cut the range to the edit start position, instead of just dropping it *)
   in
-  let shift_range range =
-    let r_start = RawDocument.loc_of_position before range.Range.start in
-    let r_stop = RawDocument.loc_of_position before range.Range.end_ in
-    let r_start', r_stop' = shift_loc r_start r_stop in
-    Range.create ~start:(RawDocument.position_of_loc after r_start') ~end_:(RawDocument.position_of_loc after r_stop')
-  in
-  let processed = CList.Smart.map shift_range st.overview.processed in
-  let processing = CList.Smart.map shift_range st.overview.processing in
-  let prepared = CList.Smart.map shift_range st.overview.prepared in
-  let overview = { processed; processing; prepared } in
+  let truncate = List.filter_map truncate_range in
+  let { processed; processing; prepared } = st.overview in
+  let overview = {
+    processed = truncate processed;
+    processing = truncate processing;
+    prepared = truncate prepared;
+  } in
   { st with overview }
 
 let executed_ranges document st =
@@ -403,7 +399,7 @@ let observe document st ~background id ~block_on_first_error : state * event Sel
               (st, events)
         end
       | [] ->
-        
+
         (st, [ mk_proof_view_event id ]))
 
 let interpret_to document st id check_mode =
@@ -508,7 +504,7 @@ let execution_finished st id started block_events =
   let pv_event = mk_proof_view_event id in
   { state; events = [ pv_event ] @ block_events; update_view; notification = None }
 
-let post_execute document st id started background proof_view_event task tasks block vst_for_next_task events exec_error = 
+let post_execute document st id started background proof_view_event task tasks block vst_for_next_task events exec_error =
   let st, tasks, block_events =
     match (block, exec_error) with
     | false, _ | _, None ->
