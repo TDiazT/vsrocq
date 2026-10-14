@@ -160,18 +160,21 @@ export function activate(context: ExtensionContext) {
         Client.showLog();
     });
     registerVsrocqCommand("showSetup", () => {
-        const configString = getConfigString(
-            client?.initializeResult?.serverInfo,
-        );
+        const setupInfo = getSetupInfo(client?.initializeResult?.serverInfo);
+        // The modal only renders plain text, so show a readable version
+        // there and keep the markdown table for the clipboard.
+        const readableString = setupInfo
+            .map(({ label, value }) => `${label}:\n${value}`)
+            .join("\n\n");
         window
             .showInformationMessage(
-                configString,
-                { modal: true },
-                { title: "Copy to clipboard", id: 0 },
+                "VsRocq Setup",
+                { modal: true, detail: readableString },
+                { title: "Copy as Markdown", id: 0 },
             )
             .then((act) => {
                 if (act?.id === 0) {
-                    env.clipboard.writeText(configString);
+                    env.clipboard.writeText(getConfigString(setupInfo));
                 }
             });
     });
@@ -205,24 +208,59 @@ export function activate(context: ExtensionContext) {
         }
     }
 
-    const getConfigString = (serverInfo: any) => {
-        const clean_strings = (str: string | undefined) => {
+    type SetupEntry = { label: string; value: string; isCode?: boolean };
+
+    const getSetupInfo = (serverInfo: any): SetupEntry[] => {
+        // The toolchain getters return "" (not undefined) when detection
+        // failed, so treat blank strings as missing too.
+        const orNA = (str: string | undefined) =>
+            str?.trim() || "not available";
+        return [
+            {
+                label: "Rocq Installation",
+                value: orNA(rocqTM.getversionFullOutput()),
+            },
+            {
+                label: "Rocq Path",
+                value: orNA(rocqTM.getRocqPath()),
+                isCode: true,
+            },
+            {
+                label: "VsRocq Extension Version",
+                value: orNA(
+                    extensions.getExtension("rocq-prover.vsrocq")?.packageJSON
+                        .version,
+                ),
+            },
+            { label: "VsRocqTop Version", value: orNA(serverInfo?.version) },
+            {
+                label: "VsRocqTop Path",
+                value: orNA(rocqTM.getVsRocqTopPath()),
+                isCode: true,
+            },
+            { label: "OS", value: `${process.arch} ${process.platform}` },
+            { label: "VSCode Version", value: version },
+        ];
+    };
+
+    const getConfigString = (setupInfo: SetupEntry[]) => {
+        const clean_strings = (str: string) => {
             // Properly escape backticks and pipes in the string, replace newlines with spaces
-            return (str ?? "not available")
+            return str
                 .replace(/`/g, "\\`")
                 .replace(/\|/g, "\\|")
                 .replace(/\n/g, " ");
         };
-        return `| Debug Information | Value |
-| ----------------- | -------------------------------- |
-| Rocq Installation | ${clean_strings(rocqTM.getversionFullOutput())} |
-| Rocq Path         | \`${clean_strings(rocqTM.getRocqPath())}\` |
-| VsRocq Extension Version   | ${clean_strings(extensions.getExtension("rocq-prover.vsrocq")?.packageJSON.version)} |
-| VsRocqTop Version | ${clean_strings(serverInfo?.version)} |
-| VsRocqTop Path  | \`${clean_strings(rocqTM.getVsRocqTopPath())}\` |
-| OS               | ${process.arch} ${process.platform} |
-| VSCode Version | ${version} |
-`;
+        const rows = setupInfo.map(({ label, value, isCode }) => {
+            const cell = clean_strings(value);
+            return `| ${label} | ${isCode ? `\`${cell}\`` : cell} |`;
+        });
+        return [
+            "| Debug Information | Value |",
+            "| ----------------- | -------------------------------- |",
+            ...rows,
+            "",
+        ].join("\n");
     };
 
     function registerVsrocqTextCommand<C extends string>(
