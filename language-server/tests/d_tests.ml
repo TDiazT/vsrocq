@@ -122,12 +122,30 @@ let %test_unit "document: expand sentence" =
   ()
 
 (* Oracle for incremental parsing: after the edits, the document must look the
-   same as a fresh parse of its final text. *)
+   same as a fresh parse of its final text. The locations inside the AST of a
+   moved sentence are behind by its [Document.ast_shift]. *)
+
+let pp_loc_pair (bp, ep) = Printf.sprintf "%d-%d" bp ep
+let pp_loc (loc : Loc.t option) = Option.value_map loc ~default:"none" ~f:(fun l -> pp_loc_pair (l.Loc.bp, l.Loc.ep))
 
 let code_line_offsets = function
   | Document.Sentence s -> Printf.sprintf "S %d %d %d" s.parsing_start s.start s.stop
   | Document.ParsingError e -> Printf.sprintf "E %d %d" e.start e.stop
   | Document.Comment c -> Printf.sprintf "C %d %d %s" c.start c.stop c.content
+
+let code_line_tokens = function
+  | Document.Sentence ({ ast = Parsed { tokens } } as s) ->
+    Printf.sprintf "S %d [%s]" s.start (String.concat ~sep:" " (List.map tokens ~f:(fun (l, t) ->
+      Printf.sprintf "%s@%s" (Tok.extract_string true t) (pp_loc_pair (l.Loc.bp, l.Loc.ep)))))
+  | Document.Sentence ({ ast = Error e } as s) -> Printf.sprintf "S %d error %s" s.start (pp_loc (fst e.msg))
+  | Document.ParsingError e -> Printf.sprintf "E %d %s" e.start (pp_loc (fst e.msg))
+  | Document.Comment c -> Printf.sprintf "C %d" c.start
+
+let code_line_ast doc = function
+  | Document.Sentence ({ ast = Parsed { ast } } as s) ->
+    let shift = Document.ast_shift doc s.id in
+    Some (Printf.sprintf "S %d ast %s" s.start (pp_loc (Option.map ast.CAst.loc ~f:(Loc.shift_loc shift shift))))
+  | _ -> None
 
 let check_same_as_fresh doc =
   let text = RawDocument.text (Document.raw_document doc) in
@@ -136,7 +154,9 @@ let check_same_as_fresh doc =
   [%test_eq: string list] (List.map (lines fresh) ~f:code_line_offsets) (List.map (lines doc) ~f:code_line_offsets);
   (* Every sentence reachable by id is the one reachable by position. *)
   let ids d = List.sort ~compare:Stateid.compare (List.map d ~f:(fun (s : Document.sentence) -> s.id)) in
-  [%test_eq: sentence_id list] (ids (Document.sentences_sorted_by_loc doc)) (ids (Document.sentences doc))
+  [%test_eq: sentence_id list] (ids (Document.sentences_sorted_by_loc doc)) (ids (Document.sentences doc));
+  [%test_eq: string list] (List.map (lines fresh) ~f:code_line_tokens) (List.map (lines doc) ~f:code_line_tokens);
+  [%test_eq: string list] (List.filter_map (lines fresh) ~f:(code_line_ast fresh)) (List.filter_map (lines doc) ~f:(code_line_ast doc))
 
 (* An edit replaces [start, stop) of the text current at the time it is applied. *)
 let range_of doc start stop =
@@ -219,6 +239,9 @@ let%test_unit "oracle: edit during a parse" =
   let doc = Document.apply_text_edit doc (edit doc (43, 44, "55")) in
   let Document.{ parsed_document } = validate_document doc in
   check_same_as_fresh parsed_document
+
+let%test_unit "oracle: move a parse error" =
+  check_same_as_fresh (edit_one_by_one ~text:"Definition a := 1. MDefinition x := 1. Check a." [16, 17, "11"])
 
 (* An insertion moves the following sentences by more than their own length:
    the old ones after the edit must be found at their old offsets. *)

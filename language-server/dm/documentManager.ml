@@ -351,6 +351,7 @@ let apply_text_edits state = function
   state, [sel_event]
 
 let handle_feedback_event state (_, id, msg) =
+  let msg = Utilities.relocate_feedback (Document.ast_shift state.document id) msg in
   { state with document = Document.append_feedback state.document id msg }
 
 let handle_feedback_events state feedback =

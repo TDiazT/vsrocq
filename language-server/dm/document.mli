@@ -96,6 +96,8 @@ type sentence = {
   scheduler_state_before : Scheduler.state;
   scheduler_state_after : Scheduler.state;
   ast : sentence_state;
+  ast_shift : int; (* how far the sentence moved since [ast] was parsed; the
+                      locations inside [ast] are behind by this amount *)
   id : sentence_id;
   messages : feedback_message list;
   checked : sentence_checking_result option;
@@ -161,6 +163,11 @@ val is_sentence_above : document -> sentence_id -> sentence_id -> bool
 (** [is_sentence_above doc id1 id2] check is id1 is above id2 *)
 
 val schedule : document -> Scheduler.schedule
+
+val ast_shift : document -> sentence_id -> int
+(** [ast_shift doc id] is how far the sentence moved since it was parsed: a
+    location coming from its AST, as in the errors and feedback of its
+    execution, is behind its current position by this amount *)
 
 val has_sentence : document -> sentence_id -> bool
 (** [has_sentence doc id] tells if id is in the document *)

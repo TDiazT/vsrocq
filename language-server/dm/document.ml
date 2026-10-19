@@ -74,6 +74,8 @@ type sentence = {
   scheduler_state_before : Scheduler.state;
   scheduler_state_after : Scheduler.state;
   ast : sentence_state;
+  ast_shift : int; (* how far the sentence moved since [ast] was parsed; the
+                      locations inside [ast] are behind by this amount *)
   id : sentence_id;
   messages : feedback_message list;
   checked : sentence_checking_result option;
@@ -155,6 +157,11 @@ let token_at_loc sentence loc =
   let contains (Loc.{ bp; ep }) = bp <= loc && loc <= ep in
   List.find_opt (fun (token_loc, _) -> contains token_loc) (tokens_of_sentence sentence) |> Option.map snd
 
+let ast_shift document id =
+  match SM.find_opt id document.sentences_by_id with
+  | Some { ast_shift } -> ast_shift
+  | None -> 0
+
 let has_sentence document id =
   None <> SM.find_opt id document.sentences_by_id
 
@@ -192,7 +199,7 @@ let add_sentence parsed id parsing_start start stop (ast: sentence_state) synter
   in
   (* FIXME may invalidate scheduler_state_XXX for following sentences -> propagate? *)
   (* What about messages generated during parsing? *)
-  let sentence = { parsing_start; start; stop; ast; id; synterp_state; scheduler_state_before; scheduler_state_after; messages = []; checked = None } in
+  let sentence = { parsing_start; start; stop; ast; id; synterp_state; scheduler_state_before; scheduler_state_after; ast_shift = 0; messages = []; checked = None } in
   let document = {
     parsed with sentences_by_end = LM.add stop id parsed.sentences_by_end;
     sentences_by_id = SM.add id sentence parsed.sentences_by_id;
@@ -461,9 +468,12 @@ let string_of_presentence ({ ast; parsing_start; stop } : pre_sentence) = string
 
 type o = Reparsed of pre_sentence | NotReparsed of int * sentence
 
-let shift_qf _ x = x
-let shift_located _ x = x
-let shift_parsed_ast _ (x : parsed_ast) = x
+let shift_qf i x = Quickfix.make ~loc:(Loc.shift_loc i i (Quickfix.loc x)) (Quickfix.pp x)
+let shift_located i (loc, x) = Option.map (Loc.shift_loc i i) loc, x
+(* The locations inside [x.ast] cannot be shifted, the sentence records the
+   shift instead, see [ast_shift] *)
+let shift_parsed_ast i (x : parsed_ast) =
+  { x with tokens = List.map (fun (loc, tok) -> Loc.shift_loc i i loc, tok) x.tokens }
 
 let shift_error i { qf; start; stop; msg; str } =
   { qf = Option.map (List.map (shift_qf i)) qf; start = start + i; stop = stop + i; msg = shift_located i msg; str }
@@ -487,13 +497,14 @@ let shift_comments shift (comments : comment LM.t) =
 let patch_sentence parsed scheduler_state_before id x =
   let o = SM.find id parsed.sentences_by_id in
   log_diff (fun () -> Format.sprintf "Patching sentence %s , %s" (Stateid.to_string id) (string_of_sentence o));
-  let parsing_start, ast, start, stop, synterp_state =
+  let parsing_start, ast, ast_shift, start, stop, synterp_state =
     match x with
-    | Reparsed { parsing_start; ast; start; stop; synterp_state } -> parsing_start, ast, start, stop, synterp_state
+    | Reparsed { parsing_start; ast; start; stop; synterp_state } -> parsing_start, ast, 0, start, stop, synterp_state
     | NotReparsed (shift,s) ->
       let { parsing_start; ast; start; stop; synterp_state } = shift_sentence shift s in
       log_diff (fun () -> Format.sprintf "Shifting it by %d" shift);
-      parsing_start, ast, start, stop, synterp_state in
+      let ast_shift = match ast with Parsed _ -> s.ast_shift + shift | Error _ -> 0 in
+      parsing_start, ast, ast_shift, start, stop, synterp_state in
   let scheduler_state_after, schedule =
     match ast with
     | Error {msg} ->
@@ -502,7 +513,7 @@ let patch_sentence parsed scheduler_state_before id x =
       let ast = (ast.ast, ast.classification, synterp_state) in
       Scheduler.schedule_sentence (id,ast) scheduler_state_before parsed.schedule
   in
-  let n = { o with ast; parsing_start; start; stop; scheduler_state_before; scheduler_state_after } in
+  let n = { o with ast; ast_shift; parsing_start; start; stop; scheduler_state_before; scheduler_state_after } in
   let sentences_by_id = SM.add id n parsed.sentences_by_id in
   let sentences_by_end = match LM.find_opt o.stop parsed.sentences_by_end with
   | Some id when Stateid.equal id n.id ->
