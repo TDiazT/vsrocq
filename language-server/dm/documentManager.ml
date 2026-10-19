@@ -328,7 +328,9 @@ let reset { uri; opts; init_vs; document; checking_state; feedback_pipe } =
   let parsebegin_event = mk_parsing_begin_event () in
   state, [parsebegin_event;feedback_event]
 
-let apply_text_edits state edits =
+let apply_text_edits state = function
+  | [] -> state, []
+  | edits ->
   (* Until we fix https://github.com/rocq-prover/rocq/issues/22041, this should stay commented:
      CheckingManager.interrupt_execution state.checking_state.
      Cancelling the event at least *)

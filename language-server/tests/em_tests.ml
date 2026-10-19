@@ -200,3 +200,19 @@ let%test_unit "exec: edit before many proofs invalidates each sentence once" =
   let st = handle_dm_events Sel.Todo.(add empty events) st in
   (* Checks that the edit kept every sentence of the 15 proofs. *)
   [%test_eq: int] 76(List.length (Document.sentences_sorted_by_loc (document st)))
+
+(* Runs [text] to the end, inserts [insert] at offset [at], and runs it again. *)
+let insert_and_run ~text ~at ~insert =
+  let st, events = em_init_test_doc ~text in
+  let st = handle_dm_events Sel.Todo.(add events (DocumentManager.interpret_to_end ())) st in
+  let raw = Document.raw_document (DocumentManager.Internal.document st) in
+  let p = RawDocument.position_of_loc raw at in
+  let st, events = DocumentManager.apply_text_edits st [Lsp.Types.Range.create ~start:p ~end_:p, insert] in
+  let st = handle_dm_events Sel.Todo.(add empty events) st in
+  handle_dm_events Sel.Todo.(add empty (DocumentManager.interpret_to_end ())) st
+
+let%test_unit "exec: sentence after an inserted definition checked again" =
+  check_no_error (insert_and_run ~text:"Definition a := 1. Check x." ~at:19 ~insert:"Definition x := 0. ")
+
+let%test_unit "exec: qed checked again after a step inserted before it" =
+  check_no_error (insert_and_run ~text:"Lemma x : True. Proof. Qed." ~at:23 ~insert:"exact I. ")

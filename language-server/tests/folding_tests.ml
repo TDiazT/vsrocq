@@ -47,8 +47,13 @@ let first_sentence doc =
   | sentence :: _ -> sentence
   | [] -> failwith "expected a parsed sentence"
 
+(* Replaces the first sentence with its own text: the raw text does not change,
+   but the document goes through a parse *)
 let revalidate_same_raw st =
   let document = DocumentManager.Internal.document st in
+  let s = first_sentence document in
+  let text = RawDocument.string_in_range (Document.raw_document document) s.start s.stop in
+  let document = Document.apply_text_edits document [Document.range_of_id document s.id, text] in
   let document, events = Document.validate_document document in
   let update = handle_d_events (Sel.Todo.add Sel.Todo.empty events) document in
   DocumentManager.Internal.validate_document st update

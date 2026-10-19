@@ -163,7 +163,9 @@ let string_in_range raw start end_ =
     String.sub raw.text start (end_ - start)
   with _ -> (* TODO: ERROR *)
     ""
-
+(* Example:
+   "123456" -> "1236"    (delete "45")   →  start = 3, stop = 5, shift = -2
+   "1236"   -> "123456"  (insert "45")   →  start = 3, stop = 3, shift = +2 *)
 type edit_impact = { start: int; stop: int; shift_after_stop: int }
 
 let apply_text_edit raw (Range.{start; end_}, editText) =

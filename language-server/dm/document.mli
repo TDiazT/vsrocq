@@ -42,7 +42,8 @@ val create_document : doc_id:document_id -> Vernacstate.Synterp.t -> string -> d
 
 val validate_document : document -> document * events
 (** [validate_document doc] triggers the parsing of the document line by line without
-    launching any execution. *)
+    launching any execution. [doc] must have a pending edit, as left by
+    [create_document] or [apply_text_edits]; otherwise this is an anomaly. *)
 
 val handle_event : document -> event -> document * events * parsing_end_info option
 (** [handle_event dpc ev] handles a parsing event for the document. One parsing event parses one line
