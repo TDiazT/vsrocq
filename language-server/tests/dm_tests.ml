@@ -316,6 +316,23 @@ let%test_unit "edit.shift_error_before_sentence" =
   [%test_eq: int] 41 (warning.range.start.character);
   [%test_eq: int] 42 (warning.range.end_.character)
 
+let%test_unit "edit.rerun_replaces_messages" =
+  let st, init_events = em_init_test_doc ~text:"Definition x := true. Check x." in
+  let st, (s1, (s2, ())) = dm_parse st (P(P O)) in
+  let todo = Sel.Todo.(add init_events (DocumentManager.interpret_to_end ())) in
+  let st, todo = handle_dm_events_todo todo st in
+  let doc = DocumentManager.Internal.document st in
+  let st, events = DocumentManager.apply_text_edits st [Document.range_of_id doc s1.id, "Definition x := 1."] in
+  let st, todo = handle_dm_events_todo Sel.Todo.(add todo events) st in
+  let st, todo = handle_dm_events_todo Sel.Todo.(add todo (DocumentManager.interpret_to_end ())) st in
+  let st, (r1, (r2, ())) = dm_parse st (P(P O)) in
+  (* The edit keeps the second sentence and re-runs it. *)
+  [%test_eq: int] (Stateid.to_int s2.id) (Stateid.to_int r2.id);
+  check_diag st [
+    D (r2.id,Information,".*nat.*")
+  ];
+  [%test_eq: int] 1 (List.length (Document.feedback (DocumentManager.Internal.document st) r2.id))
+
 let%test_unit "edit.edit_non_root_observe_id_top" =
   let st, init_events = em_init_test_doc ~text:"Definition x := 1. Definition y := 2." in
   let st, (s1, (s2, ())) = dm_parse st (P(P O)) in

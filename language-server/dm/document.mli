@@ -194,7 +194,7 @@ val update_checked : document -> sentence_id * sentence_checking_result -> docum
 (** [update_checked doc id v] updates the checked field of sentence id *)
 
 val set_unchecked : document -> sentence_id -> document
-(** [remove_checked doc id] marks id as unchecked *)
+(** [set_unchecked doc id] marks id as unchecked and removes its messages *)
 
 val is_checked : document -> sentence_id -> bool
 (** [is_checked doc id] tells if id is checked *)

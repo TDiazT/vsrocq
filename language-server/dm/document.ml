@@ -397,7 +397,8 @@ let set_unchecked parsed id =
   match SM.find_opt id parsed.sentences_by_id with
   | None -> parsed
   | Some s ->
-    { parsed with sentences_by_id = SM.add id { s with checked = None } parsed.sentences_by_id }
+    (* The sentence runs again and sends its messages again. *)
+    { parsed with sentences_by_id = SM.add id { s with checked = None; messages = [] } parsed.sentences_by_id }
 
 let is_checked parsed id =
   match SM.find_opt id parsed.sentences_by_id with

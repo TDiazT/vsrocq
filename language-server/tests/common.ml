@@ -262,5 +262,10 @@ let handle_dm_events_views e st =
   let st, _ = handle_dm_events ~on_view:(fun v -> views := v :: !views) 100 e st in
   st, List.rev !views
 
+(* Like [handle_dm_events] below, but also returns the events left. These
+   include the event that collects feedback, which a later call needs to keep
+   handling to see the messages of the sentences it runs. *)
+let handle_dm_events_todo e st = handle_dm_events 100 e st
+
 let handle_dm_events e st = fst @@ handle_dm_events 100 e st
   
