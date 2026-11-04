@@ -104,6 +104,22 @@ jobs:
       env:
         OPAMYES: true
       run: |
+        # Build coq-core 8.19.0 serially on macOS.
+        #
+        # On macos-latest (arm64) this package intermittently fails to build:
+        # ocamlc.opt dies compiling plugins/micromega/sos_lib.mli with
+        #   Fatal error: exception File "utils/warnings.ml", line 491,
+        #   characters 9-15: Assertion failed
+        # That assertion is the fallthrough of Warnings.letter, which is
+        # unreachable from any valid -w argument, so this is a compiler-level
+        # fault rather than a bad flag. It only shows up under a concurrent
+        # dune build; measured over 78 from-scratch builds per setting:
+        #   -j 1 -> 0/78 failures      -j 2 -> 26/78 (33%)      -j 4 -> 5/59 (8%)
+        # Serial build is the only setting that is clean (p = 1.2e-9), at a
+        # cost of roughly +46s on this one package.
+        if [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.coq }}" = "8.19.0" ]; then
+          export OPAMJOBS=1
+        fi
         if [ "`echo "${{ matrix.coq }}" | sed 's/dev$//'`" != "${{ matrix.coq }}" ]; then
           opam repo add rocq-core-dev https://rocq-prover.org/opam/core-dev
           opam install rocq-core.dev
