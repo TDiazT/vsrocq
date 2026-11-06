@@ -70,6 +70,8 @@ type prepared_task =
   | PSkip of { id: sentence_id; error: Pp.t option }
   | PBlock of { id: sentence_id; synterp : Vernacstate.Synterp.t; error: Pp.t Loc.located }
   | PExec of executable_sentence
+  (** Termination of a skipped proof *)
+  | PSkippedProofTerminator of executable_sentence
   | PQuery of executable_sentence
   | PDelegate of delegated_task
 
@@ -79,17 +81,35 @@ module ProofJob = struct
     | AppendFeedback of Feedback.route_id * Types.sentence_id * (Feedback.level * Loc.t option * Quickfix.t list * Pp.t)
   let appendFeedback (rid,sid) fb = AppendFeedback(rid,sid,fb)
 
+  (* For delegation on Windows, [ast] is [None] in a job sent to the worker
+     process, because its closures cannot be marshalled. The worker reruns
+     synterp on [raw_ast]. *)
+  type task = {
+    id : sentence_id;
+    ast : Synterp.vernac_control_entry option;
+    raw_ast : Vernacexpr.vernac_control;
+    synterp : Vernacstate.Synterp.t;
+    error_recovery : error_recovery_strategy;
+  }
+
   type t = {
-    tasks : executable_sentence list;
+    tasks : task list;
     initial_vernac_state : Vernacstate.t;
     doc_id : int;
     terminator_id : sentence_id;
   }
+
+  let marshallable job =
+    { job with tasks = List.map (fun task -> { task with ast = None }) job.tasks }
+
   let name = "proof"
   let binary_name = "vsrocqtop_proof_worker.opt"
   let initial_pool_size = 1
 
 end
+
+let proof_task_of_sentence ({ id; ast; raw_ast; synterp; error_recovery } : executable_sentence) =
+  { ProofJob.id; ast = Some ast; raw_ast; synterp; error_recovery }
 
 type state = {
   initial : Vernacstate.t;
@@ -104,6 +124,7 @@ let get_id_of_executed_task task =
   | PSkip {id} -> id
   | PBlock {id} -> id
   | PExec {id} -> id
+  | PSkippedProofTerminator {id} -> id
   | PQuery {id} -> id
   | PDelegate {terminator_id} -> terminator_id
 
@@ -129,36 +150,29 @@ let inject_proof_event = Sel.Event.map (fun x -> ProofWorkerEvent x)
 let inject_proof_events st l =
   (st, List.map inject_proof_event l)
 
+let admit_proof st : Vernacstate.t =
+  let { Vernacstate.Interp.lemmas; program; _ } = st.Vernacstate.interp in
+  match lemmas with
+  | None -> st (* if Lemma failed *)
+  | Some lemmas ->
+      let proof = Vernacstate.LemmaStack.get_top lemmas in
+      let pm = Declare.Proof.save_admitted ~pm:(NeList.head program) ~proof in
+      let lemmas = snd (Vernacstate.LemmaStack.pop lemmas) in
+      let program = NeList.map_head (fun _ -> pm) program in
+      Vernacstate.Declare.set (lemmas,program) [@ocaml.warning "-3"];
+      let interp = Vernacstate.Interp.freeze_interp_state () in
+      { st with interp }
+
 let interp_error_recovery strategy st : Vernacstate.t =
   match strategy with
   | RSkip -> st
   | RAdmitted ->
-    let f = Declare.Proof.save_admitted in
-    let open Vernacstate in (* shadows Declare *)
-    let { Interp.lemmas; program; _ } = st.interp in
-    match lemmas with
-    | None -> (* if Lemma failed *)
-        st
-    | Some lemmas ->
-        let proof = Vernacstate.LemmaStack.get_top lemmas in
-        let pm = NeList.head program in
-        let result = 
-          try Ok(f ~pm ~proof)
-          with e -> (* we also catch anomalies *)
-          let e, info = Exninfo.capture e in
-          Error (e, info)
-        in
-        match result with
-        | Ok (pm) ->
-          let lemmas = snd (Vernacstate.LemmaStack.pop lemmas) in
-          let program = NeList.map_head (fun _ -> pm) program in
-          Vernacstate.Declare.set (lemmas,program) [@ocaml.warning "-3"];
-          let interp = Vernacstate.Interp.freeze_interp_state () in
-          { st with interp }
-        | Error (Sys.Break, _ as exn) ->
-          Exninfo.iraise exn
-        | Error(_,_) ->
-          st
+      try admit_proof st
+      with e -> (* we also catch anomalies *)
+        let e, info = Exninfo.capture e in
+        match e with
+        | Sys.Break -> Exninfo.iraise (e, info)
+        | _ -> st
 
 [%%if rocq = "8.18" || rocq = "8.19" || rocq = "8.20" || rocq = "9.0" || rocq = "9.1"]
 let ensure_not_parsing () = Flags.in_synterp_phase := false
@@ -246,7 +260,8 @@ let id_of_last_task ~default l =
   id_of_first_task ~default (List.rev l)
 
 let view_task = function
-  | PSkip { id } | PExec { id } | PQuery { id } | PBlock { id } -> `Local id
+  | PSkip { id } | PExec { id } | PSkippedProofTerminator { id }
+  | PQuery { id } | PBlock { id } -> `Local id
   | PDelegate { opener_id; terminator_id; tasks } ->
       let first = id_of_first_task ~default:opener_id tasks in
       let last = id_of_last_task ~default:terminator_id tasks in
@@ -340,21 +355,24 @@ let prepare_task task : prepared_task list =
           List.map (fun x -> PExec x) tasks @ [PExec terminator]
       | SkipProofs ->
           log.debug (fun () -> Printf.sprintf "skipping proof made of %d tasks" (List.length tasks));
-          [PExec terminator]
-
-let id_of_prepared_task = function
-  | PSkip { id } -> id
-  | PBlock { id } -> id
-  | PExec ex -> ex.id
-  | PQuery ex -> ex.id
-  | PDelegate { terminator_id } -> terminator_id
+          begin match terminator.classif with
+          | Vernacextend.VtQed Vernacextend.VtDrop -> [PExec terminator]
+          | _ -> [PSkippedProofTerminator terminator]
+          end
 
 let purge_state = function
   | Success _ -> Success None
   | Failure(e,_,_) -> Failure (e,None,None)
 
 (* TODO move to proper place *)
-let worker_execute ~doc_id ~send_back vs { id; ast; synterp; error_recovery } =
+let worker_execute ~doc_id ~send_back vs { ProofJob.id; ast; raw_ast; synterp; error_recovery } =
+  let ast = match ast with
+    | Some ast -> ast
+    | None ->
+      (* Windows worker, see [ProofJob.task]. [vs] holds the state from before
+         this sentence *)
+      Document.synterp ~st:vs.Vernacstate.synterp raw_ast
+  in
   let vs = { vs with Vernacstate.synterp } in
   log.debug (fun () -> "worker interp " ^ Stateid.to_string id);
   let vs, v = interp_ast ~doc_id ~state_id:id ~st:vs ~error_recovery ast in
@@ -464,13 +482,29 @@ let execute st document vs task : state * execution_result =
         st, Done { updates = []; vs; events = []; exec_error }
       else
         st, promise_execution ~doc_id:st.feedback_pipe.doc_id ~state_id:id ~st:vs ~error_recovery ast
+  | PSkippedProofTerminator { id; synterp } ->
+      let vs = { vs with Vernacstate.synterp } in
+      let result = ProverThread.run ~doc_id:st.feedback_pipe.doc_id ~name:"admit_skipped_proof" (fun () ->
+        Vernacstate.unfreeze_full_state vs;
+        ensure_not_parsing ();
+        Feedback.set_id_for_feedback st.feedback_pipe.doc_id id;
+        ParTactic.set_id_for_feedback st.feedback_pipe.doc_id id;
+        admit_proof vs)
+      in
+      let vs, v = match result with
+        | Ok vs -> vs, success vs
+        | Error msg -> vs, error None None msg vs
+      in
+      let updates = [id, v] in
+      let exec_error = exec_error_of_execution_status id v in
+      st, Done { updates; vs; events = []; exec_error }
   | PQuery { id; ast; synterp; error_recovery } ->
       let vs = { vs with Vernacstate.synterp } in
       st, promise_execution ~doc_id:st.feedback_pipe.doc_id ~state_id:id ~st:vs ~error_recovery ast
   | PDelegate { terminator_id; opener_id; last_step_id; tasks; proof_using } ->
       match find_fulfilled_opt document opener_id with
       | Some (Success _) ->
-        let job =  { ProofJob.tasks; initial_vernac_state = vs; doc_id = st.feedback_pipe.doc_id; terminator_id } in
+        let job =  { ProofJob.tasks = List.map proof_task_of_sentence tasks; initial_vernac_state = vs; doc_id = st.feedback_pipe.doc_id; terminator_id } in
         let job_handle = DelegationManager.mk_job_handle (0,terminator_id) in
         (* The proof was successfully opened *)
         let last_vs, _v, assign = interp_qed_delayed ~doc_id:st.feedback_pipe.doc_id ~state_id:terminator_id ~proof_using ~st:vs in
@@ -549,10 +583,9 @@ let invalidate st id =
       Queue.push job st.jobs
     else begin
       Sel.Event.cancel cancellation;
-      removed := List.map (fun e -> PExec e) tasks :: !removed
+      removed := List.map (fun { ProofJob.id } -> id) tasks :: !removed
     end) old_jobs;
-  let st = List.fold_left invalidate1 st
-    List.(concat (map (fun tasks -> map id_of_prepared_task tasks) !removed)) in
+  let st = List.fold_left invalidate1 st (List.concat !removed) in
   st
 
 let get_initial_vernac_state st = st.initial
@@ -565,4 +598,3 @@ module ProofWorkerProcess = struct
     worker_main job ~send_back
   let log = ProofWorker.log
 end
-
